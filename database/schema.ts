@@ -139,6 +139,35 @@ export class ChecklistRespuestaSchema extends BaseModel {
   declare idRespuesta: number
 }
 
+export class CodigoAutorizacionSchema extends BaseModel {
+  static $columns = ['clientId', 'codeChallenge', 'codigoHash', 'creadoEn', 'expiraEn', 'idCodigoAutorizacion', 'idUsuario', 'nonce', 'redirectUri', 'scope', 'usado', 'usadoEn'] as const
+  $columns = CodigoAutorizacionSchema.$columns
+  @column()
+  declare clientId: string
+  @column()
+  declare codeChallenge: string
+  @column()
+  declare codigoHash: string
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column.dateTime()
+  declare expiraEn: DateTime
+  @column({ isPrimary: true })
+  declare idCodigoAutorizacion: number
+  @column()
+  declare idUsuario: number
+  @column()
+  declare nonce: string
+  @column()
+  declare redirectUri: string
+  @column()
+  declare scope: string
+  @column()
+  declare usado: boolean
+  @column.dateTime()
+  declare usadoEn: DateTime | null
+}
+
 export class CodigoVerificacionSchema extends BaseModel {
   static $columns = ['canal', 'codigoHash', 'creadoEn', 'expiraEn', 'idCodigo', 'idUsuario', 'intentosFallidos', 'proposito', 'reenvios', 'usado'] as const
   $columns = CodigoVerificacionSchema.$columns
@@ -367,6 +396,33 @@ export class EventoSchema extends BaseModel {
   declare tipo: any
   @column()
   declare titulo: string
+}
+
+export class FlujoAutorizacionSchema extends BaseModel {
+  static $columns = ['clientId', 'codeChallenge', 'consumido', 'creadoEn', 'expiraEn', 'idFlujo', 'nonce', 'redirectUri', 'scope', 'state', 'ticketHash'] as const
+  $columns = FlujoAutorizacionSchema.$columns
+  @column()
+  declare clientId: string
+  @column()
+  declare codeChallenge: string
+  @column()
+  declare consumido: boolean
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column.dateTime()
+  declare expiraEn: DateTime
+  @column({ isPrimary: true })
+  declare idFlujo: number
+  @column()
+  declare nonce: string
+  @column()
+  declare redirectUri: string
+  @column()
+  declare scope: string
+  @column()
+  declare state: string
+  @column()
+  declare ticketHash: string
 }
 
 export class InsumoSchema extends BaseModel {

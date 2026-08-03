@@ -16,6 +16,24 @@ import { middleware } from './kernel.js'
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
+/**
+ * ══════════════════════════════════════════════════════════════════════════
+ *  PROVEEDOR DE IDENTIDAD — sin prefijo /v1 y sin envelope.
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * Estas rutas siguen la especificación OAuth 2.1 / OIDC al pie de la letra:
+ * las URLs son las que esperan las librerías cliente estándar. En producción
+ * viven bajo el subdominio auth.sgeb.mediocres.mx, con su propio origen, para
+ * que la cookie de sesión SSO pertenezca al proveedor y no a la API.
+ */
+router.get('/.well-known/openid-configuration', '#modules/identidad/controllers/protocolo_controller.descubrimiento')
+router.get('/.well-known/jwks.json', '#modules/identidad/controllers/protocolo_controller.jwks')
+router.get('/authorize', '#modules/identidad/controllers/protocolo_controller.authorize')
+router.post('/token', '#modules/identidad/controllers/protocolo_controller.token')
+router.get('/userinfo', '#modules/identidad/controllers/protocolo_controller.userinfo')
+router.get('/logout', '#modules/identidad/controllers/protocolo_controller.logout')
+router.post('/token/revoke', '#modules/identidad/controllers/protocolo_controller.revocar')
+
 router
   .group(() => {
     // ---------------------------------------------------------------- pública

@@ -35,6 +35,13 @@ export default await Env.create(new URL('../', import.meta.url), {
   SSO_ISSUER: Env.schema.string({ format: 'url' }),
   /** Claim `aud`. Un token emitido para otro destinatario no sirve aquí. */
   SSO_AUDIENCE: Env.schema.string(),
+  /**
+   * Llave maestra AES-256-GCM (32 bytes en hex) que cifra las llaves privadas
+   * de firma en reposo. Vive FUERA de la base de datos: si estuviera dentro, un
+   * volcado bastaría para firmar tokens arbitrarios.
+   *   Generar con: openssl rand -hex 32
+   */
+  SSO_MASTER_KEY: Env.schema.string(),
 
   // ---------------------------------------------------------------- MQTT (VPS 4)
   MQTT_URL: Env.schema.string(),

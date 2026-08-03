@@ -4,7 +4,7 @@ Backend del Sistema de Gestión de Eventos de Banquetes. Monolito modular: un so
 
 Este proyecto se generó con `create-adonisjs` (starter kit oficial de API para v7) y se adaptó al SGEB. **No es un esqueleto suelto**: trae `ace.js`, `bin/`, `config/`, `tsconfig.json` y todo el andamiaje del framework.
 
-**Verificado en Node 24.12.0 y PostgreSQL 16:** `npm install` sin `ERESOLVE` · `npm run typecheck` sin errores · servidor arrancando y respondiendo con el envelope · 37 tablas migradas, revertidas y re-aplicadas sin residuos · 19 pruebas en verde.
+**Verificado en Node 24.12.0 y PostgreSQL 16:** `npm install` sin `ERESOLVE` · `npm run typecheck` sin errores · servidor arrancando y respondiendo con el envelope · 37 tablas migradas, revertidas y re-aplicadas sin residuos · 29 modelos mapeados · 28 pruebas en verde.
 
 ---
 
@@ -268,7 +268,7 @@ Se resolvieron al implementar. Conviene corregirlas también en el documento par
 | 3 | EVENTO | Tipo `VARCHAR(40)` para `titulo`, pero las reglas permiten 120 | VARCHAR(120) |
 | 4 | DATOS_BANCARIOS | `titular_cuenta VARCHAR(50)` con regex `{3,500}` | VARCHAR(50); el regex es errata |
 | 5 | NOTIFICACION | `mensaje VARCHAR(100)` pero la sanitización dice "truncar a 255" | VARCHAR(100) |
-| 6 | ORDEN | El enumerado usa `entregada`; `openapi-sgeb.yaml` usa `servida` | Se adopta el Diccionario; **falta alinear el OpenAPI** |
+| 6 | ORDEN | El enumerado usa `entregada`; `openapi-sgeb.yaml` usaba `servida` | **Resuelto**: se adopta el Diccionario. `openapi-sgeb.yaml` v1.4 ya usa `entregada` |
 
 **La #1 es la grave.** No es un detalle de estilo: `DECIMAL(10,8)` provoca `numeric field overflow` al guardar cualquier longitud de tres dígitos, así que **toda confirmación de llegada fallaría en la sede del propio negocio**. Reproducido en PostgreSQL:
 
@@ -277,7 +277,16 @@ ERROR: numeric field overflow
 DETAIL: A field with precision 10, scale 8 must round to an absolute value less than 10^2.
 ```
 
-La #6 sigue abierta: hay que decidir si el OpenAPI cambia a `entregada` o el Diccionario a `servida`, pero los dos no pueden convivir.
+La #6 quedó resuelta a favor del Diccionario: `openapi-sgeb.yaml` v1.4 cambió el filtro de `/eventos/{id}/ordenes` y la sección `barra` del dashboard (`servidas` → `entregadas`, más el conteo de `dispensando`, que antes no se reportaba).
+
+**Ojo con los dos enumerados de orden**, que se parecen y no son lo mismo:
+
+| Tabla | Valores |
+|---|---|
+| `ORDEN.estado` | pendiente · en_preparacion · **dispensando** · **entregada** · cancelada · pausada_por_insumo |
+| `ORDEN_DETALLE.estado` | pendiente · **dispensada** · entregada · pausada_por_insumo |
+
+Un detalle puede estar `dispensada` mientras la orden sigue `en_preparacion`, porque otro renglón no ha salido de la barra.
 
 ### Invariantes que impone la base, no la aplicación
 
@@ -303,7 +312,7 @@ Los índices parciales (los tres primeros) no se pueden hacer con un `UNIQUE` or
 ```bash
 createdb sgeb_test
 NODE_ENV=test node ace migration:run
-node ace test unit          # 19 pruebas
+node ace test unit          # 28 pruebas
 ```
 
 Cada prueba corre en una transacción que se revierte al terminar, así el orden de ejecución no importa.
@@ -312,10 +321,23 @@ Cada prueba corre en una transacción que se revierte al terminar, así el orden
 
 ---
 
+## Modelos
+
+Los 29 modelos Lucid, uno por tabla del Diccionario, distribuidos por módulo. Cada uno se prueba contra el esquema real en `tests/unit/modelos_dominio.spec.ts`: un `columnName` equivocado compila sin problema y truena en la primera consulta, así que esas pruebas mueven el fallo al CI.
+
+Tres decisiones que se repiten en todos:
+
+**`consume` en los DECIMAL.** El driver de PostgreSQL entrega los decimales como cadena para no perder precisión. Sin convertirlos, calcular la distancia a la geocerca haría aritmética con strings y daría `NaN`. Aplica a coordenadas, tarifas, costos, caudales y montos.
+
+**`serializeAs: null` en los enteros de usuario.** `Evento.idCapitan`, `ParticipacionEvento.idUsuario`, `ReporteMerma.idGeneradoPor` y `DatosBancarios.idUsuario` son llaves internas de JOIN y no salen del backend. Hacia afuera se expone el UUID, que el servicio resuelve vía `IdentidadService`.
+
+**Enmascarado en el propio modelo.** `DatosBancarios.clabe` y `Pago.clabeDestino` se serializan como `0121…8903`. Ponerlo en el modelo y no en cada controlador significa que no hay forma de olvidarlo. `Calificacion.tokenComensal` directamente no se serializa: devolverlo permitiría cruzar calificaciones con el orden de escaneo y deducir quién dijo qué, que es justo lo que el anonimato debe impedir.
+
+---
+
 ## Lo que falta
 
-1. **Modelos Lucid del dominio** — hay tres (`Usuario`, `Rol`, `Salon`); faltan 26.
-2. **Módulo de identidad** — proveedor OAuth 2.1 + PKCE (Entorno v0.4 §8.4). El más largo.
+1. **Módulo de identidad** — proveedor OAuth 2.1 + PKCE (Entorno v0.4 §8.4). El más largo.
 3. **Módulos de dominio** — eventos → participaciones → menú → órdenes → cierre.
 4. **Cubaitor** — cliente MQTT suscrito al broker del VPS 4.
 5. **Dashboard** — al final: agrega lo que los demás producen.
