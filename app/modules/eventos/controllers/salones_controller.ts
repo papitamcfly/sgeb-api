@@ -51,11 +51,16 @@ export default class SalonesController {
  */
 const salonValidator = vine.compile(
   vine.object({
-    nombre: vine.string().trim().minLength(3).maxLength(60),
-    direccion: vine.string().trim().minLength(5).maxLength(150),
+    nombre: vine.string().trim().minLength(3).maxLength(80),
+    calle: vine.string().trim().minLength(5).maxLength(50),
+    cp: vine.string().trim().fixedLength(5).regex(/^\d{5}$/),
+    colonia: vine.string().trim().minLength(2).maxLength(40),
+    ciudad: vine.string().trim().minLength(2).maxLength(40),
+    estado: vine.string().trim().minLength(2).maxLength(25),
     latitud: vine.number().min(-90).max(90),
     longitud: vine.number().min(-180).max(180),
-    capacidadMaxMesas: vine.number().positive().max(500),
+    capacidadMaxMesas: vine.number().positive().max(255),
+    capacidadPersonas: vine.number().positive().max(65535),
   })
 )
 

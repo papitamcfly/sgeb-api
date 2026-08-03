@@ -1,4 +1,3 @@
-import { DateTime } from 'luxon'
 import { BaseModel, column } from '@adonisjs/lucid/orm'
 
 /**
@@ -17,29 +16,41 @@ export default class Salon extends BaseModel {
   declare nombre: string
 
   @column()
-  declare direccion: string
+  declare calle: string
+
+  @column()
+  declare cp: string
+
+  @column()
+  declare colonia: string
+
+  @column()
+  declare ciudad: string
+
+  @column()
+  declare estado: string
 
   /**
-   * Coordenadas del recinto. Son el centro de la geocerca de confirmación de
-   * llegada (SGEB-4003). Cambiarlas NO reescribe la geocerca de eventos ya
-   * publicados: cada evento congela su punto y su radio al crearse, porque de
-   * esas asistencias dependen pagos ya calculados.
+   * Centro de la geocerca de confirmación de llegada (SGEB-4003). Cambiarlas NO
+   * reescribe la geocerca de eventos ya publicados: cada evento congela su
+   * punto y su radio al crearse, porque de esas asistencias dependen pagos.
+   *
+   * `consume` fuerza a número: el driver de PostgreSQL entrega los DECIMAL como
+   * cadena para no perder precisión, y sin esto una comparación de distancia
+   * terminaría haciendo aritmética con strings.
    */
-  @column()
+  @column({ consume: (v) => (v === null ? null : Number(v)) })
   declare latitud: number
 
-  @column()
+  @column({ consume: (v) => (v === null ? null : Number(v)) })
   declare longitud: number
 
   @column({ columnName: 'capacidad_max_mesas', serializeAs: 'capacidad_max_mesas' })
   declare capacidadMaxMesas: number
 
+  @column({ columnName: 'capacidad_personas', serializeAs: 'capacidad_personas' })
+  declare capacidadPersonas: number
+
   @column()
   declare activo: boolean
-
-  @column.dateTime({ autoCreate: true, serializeAs: 'creado_en' })
-  declare creadoEn: DateTime
-
-  @column.dateTime({ autoCreate: true, autoUpdate: true, serializeAs: 'actualizado_en' })
-  declare actualizadoEn: DateTime
 }

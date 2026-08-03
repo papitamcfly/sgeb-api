@@ -4,7 +4,7 @@ Backend del Sistema de Gestión de Eventos de Banquetes. Monolito modular: un so
 
 Este proyecto se generó con `create-adonisjs` (starter kit oficial de API para v7) y se adaptó al SGEB. **No es un esqueleto suelto**: trae `ace.js`, `bin/`, `config/`, `tsconfig.json` y todo el andamiaje del framework.
 
-**Verificado en Node 24.12.0:** `npm install` sin `ERESOLVE` · `npm run typecheck` sin errores · servidor arrancando y respondiendo con el envelope.
+**Verificado en Node 24.12.0 y PostgreSQL 16:** `npm install` sin `ERESOLVE` · `npm run typecheck` sin errores · servidor arrancando y respondiendo con el envelope · 37 tablas migradas, revertidas y re-aplicadas sin residuos · 19 pruebas en verde.
 
 ---
 
@@ -228,16 +228,99 @@ En producción `technical_message` no sale: lo filtra `limpiarParaCliente`.
 
 ---
 
+## Base de datos
+
+**37 tablas**: las 29 del Diccionario de Datos en `public` y las 8 del módulo de identidad en `auth`. Seis migraciones, probadas contra PostgreSQL 16: aplicadas, revertidas y re-aplicadas sin dejar tablas ni tipos ENUM huérfanos.
+
+| Migración | Contenido |
+|---|---|
+| `…001_create_usuarios_y_roles` | ROL (con los 3 roles precargados), USUARIO, DATOS_BANCARIOS |
+| `…002_create_auth_module_tables` | Esquema `auth` + sus 8 tablas |
+| `…003_create_eventos_core` | SALON, EVENTO, MESA, PARTICIPACION_EVENTO, CONFIRMACION_LLEGADA, ASIGNACION_MESA |
+| `…004_create_checklists_y_menu` | CHECKLIST y sus 3 tablas, INSUMO, BEBIDA, RECETA_INGREDIENTE, ENVASE |
+| `…005_create_iot_y_ordenes` | CUBAITOR, CONFIG_DISPENSADO, ORDEN, ORDEN_DETALLE, DISPENSADO |
+| `…006_create_comunicacion_y_cierre` | CRONOGRAMA_EVENTO, SOLICITUD_SERVICIO, NOTIFICACION, CALIFICACION, PAGO, REPORTE_MERMA, MERMA_DETALLE |
+
+Del módulo de identidad son 8 y no 9: `CREDENCIAL_BIOMETRICA` no se crea, porque la decisión v0.4 retiró la biometría como método de autenticación y la confirmación de llegada usa atestación local.
+
+### Dónde vive USUARIO, y por qué
+
+En `public`, no en `auth`. Es la tabla más referenciada del sistema —EVENTO la apunta dos veces, más PARTICIPACION_EVENTO, REPORTE_MERMA y DATOS_BANCARIOS—; ponerla en `auth` obligaría a cinco tablas de dominio a apuntar hacia afuera, o a renunciar a esas llaves foráneas.
+
+**Es una tabla de dominio que además guarda credenciales**, no al revés. El esquema `auth` aloja solo las 8 tablas que existen únicamente para autenticar y que se mudan completas el día de la extracción.
+
+Por eso las FK cruzan en una sola dirección: `auth.*` → `public.usuario`, nunca al revés. Verificado por consulta y fijado por una prueba automatizada:
+
+```
+FKs public → auth: 0
+```
+
+Al extraer el módulo, sus tablas viajan con una proyección de USUARIO que se convierte en CUENTA con `uuid_usuario` como PK (Anexo D del Diccionario v3). Del lado del SGEB, USUARIO queda como copia sombra sin `password_hash`. **Ninguna tabla de dominio se ve afectada**, que es exactamente el objetivo.
+
+### Discrepancias encontradas en el Diccionario de Datos
+
+Se resolvieron al implementar. Conviene corregirlas también en el documento para que no reaparezcan.
+
+| # | Tabla | Discrepancia | Resolución |
+|---|---|---|---|
+| 1 | CONFIRMACION_LLEGADA | `longitud DECIMAL(10,8)` solo admite **dos** dígitos enteros (máx. 99.99999999). Torreón está en −103.4 | **DECIMAL(11,8)**, igual que en SALON |
+| 2 | SALON | Tipo `VARCHAR(30)` para `nombre`, pero las reglas permiten 80 | VARCHAR(80) |
+| 3 | EVENTO | Tipo `VARCHAR(40)` para `titulo`, pero las reglas permiten 120 | VARCHAR(120) |
+| 4 | DATOS_BANCARIOS | `titular_cuenta VARCHAR(50)` con regex `{3,500}` | VARCHAR(50); el regex es errata |
+| 5 | NOTIFICACION | `mensaje VARCHAR(100)` pero la sanitización dice "truncar a 255" | VARCHAR(100) |
+| 6 | ORDEN | El enumerado usa `entregada`; `openapi-sgeb.yaml` usa `servida` | Se adopta el Diccionario; **falta alinear el OpenAPI** |
+
+**La #1 es la grave.** No es un detalle de estilo: `DECIMAL(10,8)` provoca `numeric field overflow` al guardar cualquier longitud de tres dígitos, así que **toda confirmación de llegada fallaría en la sede del propio negocio**. Reproducido en PostgreSQL:
+
+```
+ERROR: numeric field overflow
+DETAIL: A field with precision 10, scale 8 must round to an absolute value less than 10^2.
+```
+
+La #6 sigue abierta: hay que decidir si el OpenAPI cambia a `entregada` o el Diccionario a `servida`, pero los dos no pueden convivir.
+
+### Invariantes que impone la base, no la aplicación
+
+Están en la base porque una regla que solo vive en el código se salta desde una consola de `psql`, desde un script de migración de datos o desde un endpoint que alguien escriba sin conocerla. Cada uno tiene su prueba en `tests/unit/esquema_invariantes.spec.ts`.
+
+| Restricción | Qué impide |
+|---|---|
+| `datos_bancarios_una_activa_por_usuario` | Dos CLABEs activas del mismo mesero → ambigüedad al dispersar el pago |
+| `llave_firma_una_activa` | Dos llaves de firma activas → los tokens se firman de forma no determinista |
+| `invitacion_una_pendiente_por_correo` | Dos capitanes invitando a la misma persona → cuenta duplicada |
+| `participacion_evento (id_evento, id_usuario)` | Doble toque en la app → dos lugares del cupo consumidos |
+| `mesa (id_evento, etiqueta)` | Dos "Mesa 1" en el mismo evento. Entre eventos sí se permite |
+| `config_dispensado_pin_unico_por_evento` | Dos insumos en el mismo GPIO (SGEB-4019) → la bebida sale con el líquido equivocado |
+| `calificacion.token_comensal UNIQUE` | Segunda calificación del mismo comensal (SGEB-4010); es lo único que deduplica, porque el comensal es anónimo |
+| `CHECK evento_fin_posterior_a_inicio` | Eventos que terminan antes de empezar |
+| `CHECK evento_geocerca_valida` | Radios fuera de 10–1000 m |
+| `CHECK config_disponible_no_excede_cargado` | Más líquido disponible que cargado |
+
+Los índices parciales (los tres primeros) no se pueden hacer con un `UNIQUE` ordinario: hay que permitir muchas filas inactivas y solo una activa. Eso es exactamente un índice parcial con `WHERE`.
+
+### Base de pruebas
+
+```bash
+createdb sgeb_test
+NODE_ENV=test node ace migration:run
+node ace test unit          # 19 pruebas
+```
+
+Cada prueba corre en una transacción que se revierte al terminar, así el orden de ejecución no importa.
+
+**Detalle que muerde al probar restricciones:** PostgreSQL aborta la transacción completa al primer error, y toda consulta posterior responde `current transaction is aborted`. Por eso las violaciones esperadas se envuelven en un `SAVEPOINT` (helper `debeFallar`). Es el mismo patrón que necesita la aplicación cuando quiere intentar un `INSERT` y reaccionar al duplicado sin abortar toda la operación.
+
+---
+
 ## Lo que falta
 
-Este proyecto cubre la capa transversal y un módulo de referencia (`salones`). Pendiente, en orden sugerido:
-
-1. **Migraciones y modelos** — 38 tablas. Esquema `auth` separado desde el primer día, sin FK cruzadas.
+1. **Modelos Lucid del dominio** — hay tres (`Usuario`, `Rol`, `Salon`); faltan 26.
 2. **Módulo de identidad** — proveedor OAuth 2.1 + PKCE (Entorno v0.4 §8.4). El más largo.
 3. **Módulos de dominio** — eventos → participaciones → menú → órdenes → cierre.
 4. **Cubaitor** — cliente MQTT suscrito al broker del VPS 4.
 5. **Dashboard** — al final: agrega lo que los demás producen.
-6. **Pruebas** — funcionales por endpoint. `@japa/openapi-assertions` permite validar las respuestas contra `openapi-sgeb.yaml` directamente.
+6. **Pruebas funcionales** por endpoint. `@japa/openapi-assertions` permite validar las respuestas contra `openapi-sgeb.yaml` directamente.
+7. **Alinear la discrepancia #6** (`entregada` vs `servida`) entre Diccionario y OpenAPI.
 
 ---
 
