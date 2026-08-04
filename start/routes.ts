@@ -78,9 +78,9 @@ router
       .group(() => {
         router.get('/salones', '#modules/eventos/controllers/salones_controller.listar')
         router.post('/salones', '#modules/eventos/controllers/salones_controller.crear')
-        router.get('/salones/:id', '#modules/eventos/controllers/salones_controller.mostrar')
-        router.put('/salones/:id', '#modules/eventos/controllers/salones_controller.actualizar')
-        router.delete('/salones/:id', '#modules/eventos/controllers/salones_controller.desactivar')
+        router.get('/salones/:id_salon', '#modules/eventos/controllers/salones_controller.mostrar')
+        router.put('/salones/:id_salon', '#modules/eventos/controllers/salones_controller.actualizar')
+        router.delete('/salones/:id_salon', '#modules/eventos/controllers/salones_controller.desactivar')
 
         router.post('/eventos', '#modules/eventos/controllers/eventos_controller.crear')
         router.put('/eventos/:id_evento', '#modules/eventos/controllers/eventos_controller.actualizar')
@@ -93,6 +93,45 @@ router
         router.patch('/participaciones/:id_participacion/estado', '#modules/participaciones/controllers/participaciones_controller.cambiarEstado')
         router.post('/participaciones/:id_participacion/asignaciones', '#modules/participaciones/controllers/participaciones_controller.asignarMesa')
         router.delete('/asignaciones/:id_asignacion', '#modules/participaciones/controllers/participaciones_controller.liberarMesa')
+
+        // ── Catálogo del menú y barra ─────────────────────────────────
+        router.get('/insumos', '#modules/menu/controllers/menu_controller.listarInsumos')
+        router.post('/insumos', '#modules/menu/controllers/menu_controller.crearInsumo')
+        router.patch('/insumos/:id_insumo/estado', '#modules/menu/controllers/menu_controller.cambiarEstadoInsumo')
+        router.delete('/insumos/:id_insumo', '#modules/menu/controllers/menu_controller.desactivarInsumo')
+
+        router.post('/bebidas', '#modules/menu/controllers/menu_controller.crearBebida')
+        router.put('/bebidas/:id_bebida/receta', '#modules/menu/controllers/menu_controller.definirReceta')
+        router.delete('/bebidas/:id_bebida', '#modules/menu/controllers/menu_controller.desactivarBebida')
+
+        router.post('/envases', '#modules/menu/controllers/menu_controller.crearEnvase')
+        router.delete('/envases/:id_envase', '#modules/menu/controllers/menu_controller.desactivarEnvase')
+
+        // ── Cubaitor y configuración de pines ─────────────────────────
+        router.get('/cubaitors', '#modules/cubaitor/controllers/cubaitor_controller.listar')
+        router.post('/cubaitors', '#modules/cubaitor/controllers/cubaitor_controller.registrar')
+        router.get('/cubaitors/:id_cubaitor/estado', '#modules/cubaitor/controllers/cubaitor_controller.estado')
+
+        router.get('/eventos/:id_evento/config-dispensado', '#modules/cubaitor/controllers/cubaitor_controller.listarConfig')
+        router.post('/eventos/:id_evento/config-dispensado', '#modules/cubaitor/controllers/cubaitor_controller.configurarPin')
+        router.patch('/eventos/:id_evento/config-dispensado/:id_config/recarga', '#modules/cubaitor/controllers/cubaitor_controller.recargar')
+
+        // ── Checklists: plantillas y aprobación ───────────────────────
+        router.post('/checklists', '#modules/checklists/controllers/checklists_controller.crear')
+        router.put('/checklists/:id_checklist', '#modules/checklists/controllers/checklists_controller.actualizar')
+        router.delete('/checklists/:id_checklist', '#modules/checklists/controllers/checklists_controller.desactivar')
+        router.post('/participaciones/:id_participacion/checklist-instancias', '#modules/checklists/controllers/checklists_controller.instanciar')
+        router.patch('/checklist-instancias/:id_instancia/aprobar', '#modules/checklists/controllers/checklists_controller.aprobar')
+
+        // ── Cierre: mermas y pagos ────────────────────────────────────
+        router.get('/eventos/:id_evento/reportes-merma', '#modules/cierre/controllers/cierre_controller.listarMermas')
+        router.post('/eventos/:id_evento/reportes-merma', '#modules/cierre/controllers/cierre_controller.registrarMerma')
+
+        router.get('/eventos/:id_evento/cierre', '#modules/cierre/controllers/cierre_controller.verificar')
+        router.get('/eventos/:id_evento/pagos', '#modules/cierre/controllers/cierre_controller.listarPagos')
+        router.post('/eventos/:id_evento/pagos/calcular', '#modules/cierre/controllers/cierre_controller.calcular')
+        router.patch('/pagos/:id_pago/pagado', '#modules/cierre/controllers/cierre_controller.marcarPagado')
+        router.patch('/pagos/:id_pago/fallido', '#modules/cierre/controllers/cierre_controller.marcarFallido')
       })
       .use([middleware.auth(), middleware.sujeto(), middleware.rol(['capitan', 'admin'])])
 
@@ -104,6 +143,30 @@ router
         router.get('/eventos', '#modules/eventos/controllers/eventos_controller.listar')
         router.get('/eventos/:id_evento', '#modules/eventos/controllers/eventos_controller.mostrar')
         router.get('/eventos/:id_evento/participaciones', '#modules/participaciones/controllers/participaciones_controller.listar')
+
+        /**
+         * El menú lo consultan los tres roles: el mesero lo necesita para
+         * levantar la orden en la mesa.
+         */
+        router.get('/checklists', '#modules/checklists/controllers/checklists_controller.listar')
+        router.get('/checklists/:id_checklist', '#modules/checklists/controllers/checklists_controller.mostrar')
+        router.get('/participaciones/:id_participacion/checklist-instancias', '#modules/checklists/controllers/checklists_controller.listarInstancias')
+
+        router.get('/bebidas', '#modules/menu/controllers/menu_controller.listarBebidas')
+        router.get('/envases', '#modules/menu/controllers/menu_controller.listarEnvases')
+
+        /** Tablero de barra: lo miran el capitán y quien esté en la barra. */
+        router.get('/eventos/:id_evento/ordenes', '#modules/ordenes/controllers/ordenes_controller.listarPorEvento')
+        router.get('/ordenes/:id_orden', '#modules/ordenes/controllers/ordenes_controller.mostrar')
+        router.patch('/ordenes/:id_orden/estado', '#modules/ordenes/controllers/ordenes_controller.cambiarEstado')
+
+        /**
+         * Dispensar y reportar los ejecuta quien atiende la barra, que puede ser
+         * un mesero con puesto 'barra' o el propio capitán. Por eso van aquí y
+         * no en el grupo exclusivo de meseros.
+         */
+        router.post('/orden-detalles/:id_detalle/dispensar', '#modules/ordenes/controllers/ordenes_controller.dispensar')
+        router.patch('/dispensados/:id_dispensado/reporte', '#modules/ordenes/controllers/ordenes_controller.reportar')
       })
       .use([middleware.auth(), middleware.sujeto()])
 
@@ -114,6 +177,12 @@ router
         router.delete('/participaciones/:id_participacion', '#modules/participaciones/controllers/participaciones_controller.liberar')
         router.post('/participaciones/:id_participacion/confirmacion-llegada', '#modules/participaciones/controllers/participaciones_controller.confirmarLlegada')
         router.patch('/asignaciones/:id_asignacion/vincular', '#modules/participaciones/controllers/participaciones_controller.vincularMesa')
+
+        /** Marcar el checklist es del mesero: es quien montó las mesas. */
+        router.put('/checklist-instancias/:id_instancia/respuestas', '#modules/checklists/controllers/checklists_controller.responder')
+
+        /** Levantar la orden es del mesero: es quien está en la mesa. */
+        router.post('/mesas/:id_mesa/ordenes', '#modules/ordenes/controllers/ordenes_controller.crear')
       })
       .use([middleware.auth(), middleware.sujeto(), middleware.rol(['mesero'])])
   })

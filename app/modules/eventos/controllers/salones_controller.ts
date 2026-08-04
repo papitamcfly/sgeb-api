@@ -25,7 +25,7 @@ export default class SalonesController {
   }
 
   async mostrar(ctx: HttpContext) {
-    return responder.ok(ctx, await this.servicio.obtener(ctx.request.param('id')))
+    return responder.ok(ctx, await this.servicio.obtener(ctx.request.param('id_salon')))
   }
 
   async crear(ctx: HttpContext) {
@@ -35,12 +35,12 @@ export default class SalonesController {
 
   async actualizar(ctx: HttpContext) {
     const datos = await salonValidator.validate(ctx.request.body())
-    return responder.ok(ctx, await this.servicio.actualizar(ctx.request.param('id'), datos))
+    return responder.ok(ctx, await this.servicio.actualizar(ctx.request.param('id_salon'), datos))
   }
 
   async desactivar(ctx: HttpContext) {
-    await this.servicio.desactivar(ctx.request.param('id'))
-    return responder.ok(ctx, null, `SALON id=${ctx.request.param('id')} activo=0.`)
+    await this.servicio.desactivar(ctx.request.param('id_salon'))
+    return responder.ok(ctx, null, `SALON id=${ctx.request.param('id_salon')} activo=0.`)
   }
 }
 

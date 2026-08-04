@@ -82,13 +82,36 @@ export class CubaitorService {
     caudalMlSeg: number
     volumenCargadoMl: number
   }) {
+    /**
+     * ────────────────────────────────────────────────────────────────────
+     *  El INSERT va dentro de una transacción anidada (SAVEPOINT).
+     * ────────────────────────────────────────────────────────────────────
+     * PostgreSQL aborta la transacción COMPLETA ante cualquier error, y toda
+     * consulta posterior responde "current transaction is aborted". Atrapar la
+     * violación de unicidad y seguir adelante no basta: si esta llamada ocurre
+     * dentro de una transacción mayor —otro servicio orquestando varios pasos,
+     * o una prueba envuelta en transacción— el `catch` devuelve un error
+     * bonito sobre una transacción ya inservible, y lo siguiente falla con un
+     * mensaje que no tiene nada que ver.
+     *
+     * El SAVEPOINT acota el daño: si el INSERT falla se vuelve al punto previo
+     * y la transacción del llamador sigue viva.
+     *
+     * Regla general: **si vas a CAPTURAR una violación de constraint y
+     * continuar, tienes que aislarla en un savepoint.**
+     */
     try {
-      return await ConfigDispensado.create({
-        ...datos,
-        volumenDisponibleMl: datos.volumenCargadoMl,
-        ultimaCalibracion: DateTime.now(),
-        activo: true,
-      })
+      return await db.transaction(async (trx) =>
+        ConfigDispensado.create(
+          {
+            ...datos,
+            volumenDisponibleMl: datos.volumenCargadoMl,
+            ultimaCalibracion: DateTime.now(),
+            activo: true,
+          },
+          { client: trx }
+        )
+      )
     } catch (error) {
       const e = error as { code?: string; constraint?: string }
       if (e.code === '23505' && e.constraint?.includes('pin_unico')) {

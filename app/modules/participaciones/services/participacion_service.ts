@@ -87,17 +87,25 @@ export class ParticipacionService {
         })
       }
 
+      /**
+       * Transacción anidada (SAVEPOINT) alrededor del INSERT: se va a capturar
+       * la violación de unicidad, y sin aislarla la transacción quedaría
+       * abortada aunque el error se maneje. Ver la nota extensa en
+       * CubaitorService.configurarPin.
+       */
       try {
-        return await ParticipacionEvento.create(
-          {
-            idEvento,
-            idUsuario: usuario.id,
-            puesto: 'mesero',
-            estado: 'aparto',
-            fechaAparto: DateTime.now(),
-            checklistOk: false,
-          },
-          { client: trx }
+        return await trx.transaction(async (sp) =>
+          ParticipacionEvento.create(
+            {
+              idEvento,
+              idUsuario: usuario.id,
+              puesto: 'mesero',
+              estado: 'aparto',
+              fechaAparto: DateTime.now(),
+              checklistOk: false,
+            },
+            { client: sp }
+          )
         )
       } catch (error) {
         const e = error as { code?: string }

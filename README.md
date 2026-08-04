@@ -621,15 +621,98 @@ Sin heartbeat dentro del umbral, el dashboard lo marca fuera de linea y se habil
 
 ---
 
+#### Rutas de la barra
+
+| Grupo | Rutas |
+|---|---|
+| Capitan y admin | alta de insumos, bebidas, recetas, envases; Cubaitor; configuracion de pines; recarga |
+| Cualquier rol autenticado | consulta del menu, tablero de ordenes, dispensar, reportar |
+| Mesero | levantar la orden |
+
+Tres decisiones visibles ahi:
+
+**El mesero consulta el menu pero no lo administra.** Lo necesita para levantar la orden en la mesa; darle de alta insumos no.
+
+**Levantar la orden es del mesero; dispensar no.** Quien atiende la barra puede ser un mesero con puesto `barra` o el propio capitan, asi que dispensar y reportar viven en el grupo de cualquier rol autenticado.
+
+**El semaforo del Cubaitor responde 200 aunque el dispositivo este caido.** No es un error de la peticion, es informacion: el evento continua con dispensado manual (RNF-13). Un 503 haria que el frontend pintara una alerta de fallo cuando lo que hay es una barra trabajando a mano.
+
+#### Capturar una violacion de constraint exige un SAVEPOINT
+
+```ts
+// MAL: el catch devuelve un error bonito sobre una transaccion ya inservible
+try {
+  return await Modelo.create(datos)
+} catch (e) { if (e.code === '23505') throw new SgebError('SGEB-4019') }
+
+// BIEN: el INSERT aislado en una transaccion anidada
+try {
+  return await db.transaction(async (trx) => Modelo.create(datos, { client: trx }))
+} catch (e) { if (e.code === '23505') throw new SgebError('SGEB-4019') }
+```
+
+PostgreSQL aborta la transaccion **completa** ante cualquier error, y toda consulta posterior responde `current transaction is aborted`. Si la llamada ocurre dentro de una transaccion mayor —otro servicio orquestando varios pasos, o una prueba envuelta en transaccion— el `catch` maneja el error pero deja la transaccion muerta, y lo siguiente falla con un mensaje que no tiene nada que ver.
+
+Aplicado en `configurarPin` (SGEB-4019) y en `apartar` (SGEB-4011). **Regla general: si vas a capturar una violacion de constraint y continuar, aislala en un savepoint.**
+
+Es hermano del patron de rondas anteriores. Uno dice que los efectos que deben sobrevivir al `throw` van fuera de la transaccion; este dice que los errores que se van a capturar van dentro de una anidada.
+
+---
+
+### Cierre: mermas y pagos
+
+Aqui se mueve dinero, asi que las reglas son mas duras que en el resto del dominio.
+
+**Tres bloqueos antes de calcular pagos**, en este orden:
+
+1. El evento debe estar `finalizado`. Calcular sobre uno en curso produce importes que despues hay que corregir a mano.
+2. Ninguna participacion sin salida verificada (SGEB-4015). Un mesero que no registro salida puede haberse ido antes de tiempo, y de eso depende si se le paga completo.
+3. Todos con CLABE vigente (SGEB-4012). Sin cuenta no hay a donde transferir, y descubrirlo al dispersar deja pagos a medias.
+
+**`GET /eventos/:id/cierre` existe para que el capitan vea que le falta ANTES de intentar pagar.** Recibir un error tras pulsar "pagar" es peor que tener la lista de pendientes delante en la pantalla de cierre.
+
+**El calculo es idempotente y respeta lo ya dispersado.** Volver a llamarlo no duplica pagos; un pago en estado `pagado` es historia y no se recalcula, aunque despues cambie la tarifa del evento. Uno `pendiente` o `fallido` si se actualiza: puede que la tarifa cambiara o que el mesero corrigiera su CLABE tras un rechazo.
+
+**`pagado` es terminal.** El pago se hace por transferencia manual, sin integracion con banca: no hay a quien preguntarle si de verdad llego, asi que revertirlo dejaria el registro contradiciendo al banco.
+
+**La CLABE se guarda como snapshot** en el pago y se enmascara al serializar (`0121…8909`). Si el mesero cambia de cuenta despues, el registro sigue diciendo a donde se transfirio realmente el dinero.
+
+**El costo de merma distingue "cero" de "sin valorar".** El capitan no siempre puede valorar un plato roto en el momento, asi que la respuesta reporta `costo_total` y `piezas_sin_costear` por separado: un total de $40 con cinco piezas sin costear dice algo distinto de un total de $40 con todo costeado.
+
+---
+
+### Checklists
+
+La pieza que faltaba en medio del flujo del evento: sin checklist de montaje aprobado no hay asignacion de mesas (SGEB-4005).
+
+Tres niveles que conviene no confundir:
+
+```
+CHECKLIST            la plantilla reutilizable: "Montaje de salon"
+CHECKLIST_ITEM       sus tareas: "Colocar manteleria", cantidad esperada 20
+CHECKLIST_INSTANCIA  la aplicacion concreta a UNA participacion
+CHECKLIST_RESPUESTA  lo que ese mesero marco, item por item
+```
+
+**El servidor calcula `completado`, no el cliente.** Si la app pudiera declararlo, bastaria con enviar `completado: true` para saltarse el montaje entero. Se deriva de las respuestas y se recalcula en cada llamada.
+
+**La aprobacion es del capitan y no automatica.** Que el mesero marque las casillas dice que el cree haber terminado; quien verifica es otra persona. Solo el checklist de tipo `montaje` pone `checklist_ok = true`; los de servicio y cierre se aprueban igual pero alimentan otros bloqueos.
+
+**Una instancia aprobada no se reabre.** Permitir editar despues dejaria al mesero atendiendo mesas con un montaje que ya no coincide con lo que el capitan aprobo.
+
+**Instanciar es idempotente.** Refrescar la pantalla de montaje no debe generar instancias duplicadas: el capitan veria el mismo checklist tres veces sin saber cual aprobar.
+
+**Editar la plantilla da de baja los items viejos, no los borra.** Las respuestas historicas apuntan a ellos, y borrarlos dejaria reportes de montaje sin poder decir que se reviso. Con instancias abiertas en eventos vigentes la edicion se bloquea (SGEB-4017): un mesero podria estar a media revision y ver como le cambian las tareas bajo los pies.
+
+---
+
 ## Lo que falta
 
 1. **Correo** para códigos 2FA, invitaciones y recuperación. Hoy el código se escribe en el log fuera de producción (`[DEV] Codigo de verificacion: 123456`), que es lo que permite desarrollar sin servidor de correo.
 2. **Endpoint de invitación para el capitán** — el servicio existe y está probado; falta exponerlo con validador y permisos.
-3. **Controladores y rutas** para menú, órdenes y Cubaitor — los servicios están escritos y probados.
-4. **Cierre** — mermas y pagos.
-5. **Cliente MQTT** — hoy `procesarDetalle` devuelve las instrucciones (pin, volumen, segundos); falta publicarlas en el broker del VPS 4 y recibir el reporte.
-5. **Dashboard** — al final: agrega lo que los demás producen.
-6. **Gestión de dispositivos y sesiones** desde el perfil del usuario.
+3. **Cliente MQTT** — hoy `procesarDetalle` devuelve las instrucciones (pin, volumen, segundos); falta publicarlas en el broker del VPS 4 y recibir el reporte.
+4. **Dashboard** — al final: agrega lo que los demás producen.
+5. **Gestión de dispositivos y sesiones** desde el perfil del usuario.
 
 ---
 
