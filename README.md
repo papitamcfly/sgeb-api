@@ -571,11 +571,63 @@ El contenedor lee los metadatos que TypeScript emite para los parametros del con
 
 ---
 
+### Menu, ordenes y dispensado
+
+El camino completo: el mesero levanta la ORDEN, cada renglon es un ORDEN_DETALLE, y cada apertura de electrovalvula deja un DISPENSADO que permite auditar cuanto liquido salio de verdad contra cuanto se pidio.
+
+#### De la receta a los mililitros
+
+`RecetaCalculo` traduce "una cuba en vaso de 350 ml" a "45 ml de ron y 252 de refresco". Los tres modos del Diccionario:
+
+| Modo | Que hace | Para que |
+|---|---|---|
+| `FIJO_ML` | Mililitros exactos, sin importar el envase | El alcohol. Una cuba lleva 45 ml de ron tanto en vaso como en jarra, o la bebida saldria mas fuerte solo por pedirla en envase grande |
+| `PROPORCION` | Fraccion del volumen del envase | Ingredientes que si deben escalar, como un jarabe |
+| `RESTO` | Lo que sobre | El refresco, que rellena hasta arriba |
+
+El factor de llenado por defecto es **0.85**: el hielo ocupa espacio, y llenar al 100 % derrama al servir.
+
+`ordenServido` importa fisicamente: el alcohol va primero y el refresco al final, porque el vaso lleva hielo y el orden inverso lo desborda. El calculo ordena por ese campo, no por el orden de captura.
+
+Los **segundos de valvula** salen del caudal calibrado del pin, no de una constante: cada manguera y cada altura de botella dan un caudal distinto, y usar un valor teorico serviria tragos de volumen equivocado.
+
+#### Botella vacia: se verifica TODO antes de abrir nada
+
+`procesarDetalle` calcula la receta, verifica **todos** los insumos, y solo entonces registra dispensados y descuenta volumen. Si alguno no alcanza, **nada se sirve**: la orden entera se pausa (SGEB-4008 / SGEB-4009) en vez de servir medio vaso y dejar al comensal con una bebida que igual hay que tirar.
+
+El descuento va dentro de la transaccion con `forUpdate` sobre la configuracion del pin. Sin el, dos meseros pidiendo cubas a la vez leerian ambos "quedan 200 ml" y el segundo serviria de una botella agotada.
+
+**La pausa se aplica FUERA de la transaccion**, con el patron ya conocido. Hacerla dentro la desharia el rollback del `throw`, la orden quedaria en `pendiente`, el mesero volveria a intentar y el sistema nunca registraria que hay una botella vacia esperando al capitan.
+
+#### Recarga
+
+`recargar()` es la contraparte operativa de SGEB-4009: el capitan cambia la botella fisica, marca la recarga, y las ordenes que esperaban ese insumo vuelven a la cola sin que el mesero las recapture. Tambien reactiva el insumo si estaba en `agotado`.
+
+#### Reporte del dispositivo
+
+La diferencia entre `segundos_calculado` y `segundos_real` delata una calibracion desviada antes de que se note en el inventario. Se guarda tal cual, sin corregirla: el volumen ya descontado fue el teorico, y ajustarlo aqui mezclaria dos fuentes de verdad.
+
+Con menos del 90 % de lo pedido el dispensado queda `parcial`: la bebida salio incompleta y el mesero tiene que verla antes de llevarla a la mesa. Sin reporte dentro del tiempo esperado, SGEB-5006 y valvula forzada a cierre.
+
+#### El Cubaitor caido no bloquea el evento
+
+Sin heartbeat dentro del umbral, el dashboard lo marca fuera de linea y se habilita el dispensado manual (RNF-13). Detener la barra porque un ESP32 dejo de responder seria peor que servir a mano.
+
+#### Validaciones del catalogo
+
+- Las porciones `PROPORCION` de una receta no pasan de 1.00. Sin esta comprobacion, dos ingredientes al 60 % pedirian 120 % del vaso y el RESTO saldria negativo justo al servir, frente al comensal.
+- Un insumo dentro de la receta de una bebida activa no se puede dar de baja (SGEB-4016): esa bebida quedaria imposible de preparar.
+- Marcar un insumo como `agotado` pausa las ordenes que lo usan. Preferible pausarlas de golpe a que cada mesero descubra el problema al intentar servir.
+
+---
+
 ## Lo que falta
 
 1. **Correo** para códigos 2FA, invitaciones y recuperación. Hoy el código se escribe en el log fuera de producción (`[DEV] Codigo de verificacion: 123456`), que es lo que permite desarrollar sin servidor de correo.
 2. **Endpoint de invitación para el capitán** — el servicio existe y está probado; falta exponerlo con validador y permisos.
-3. **Menú, órdenes, Cubaitor y cierre** — quedan por escribir sus servicios, controladores y rutas.
+3. **Controladores y rutas** para menú, órdenes y Cubaitor — los servicios están escritos y probados.
+4. **Cierre** — mermas y pagos.
+5. **Cliente MQTT** — hoy `procesarDetalle` devuelve las instrucciones (pin, volumen, segundos); falta publicarlas en el broker del VPS 4 y recibir el reporte.
 5. **Dashboard** — al final: agrega lo que los demás producen.
 6. **Gestión de dispositivos y sesiones** desde el perfil del usuario.
 
