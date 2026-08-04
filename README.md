@@ -335,14 +335,249 @@ Tres decisiones que se repiten en todos:
 
 ---
 
+## Módulo de identidad
+
+Proveedor OAuth 2.1 + OpenID Connect, **verificado de punta a punta**.
+
+### Antes del primer login
+
+```bash
+openssl rand -hex 32          # → SSO_MASTER_KEY en .env
+node ace sso:rotar-llave      # sin esto no hay con qué firmar (SSO-5001)
+```
+
+### Es SSO de verdad
+
+La sesión del proveedor (`auth.sesion_sso`) es lo que lo convierte en inicio de sesión único:
+
+```
+2. credenciales           → pantalla de verificación
+3. código 2FA             → 302 mx.mediocres.sgeb://callback?code=…
+   cookie de sesión SSO   → plantada
+4. canje                  → access_token, expira en 900 s
+
+5. SEGUNDA APP (panel web) con la misma sesión → 302 directo al callback
+   ¿pidió credenciales? NO  ← esto es el SSO
+
+6. logout                 → sesión destruida y cadena revocada
+7. tras logout            → vuelve a pedir credenciales
+```
+
+La cookie es `HttpOnly`, `Secure` y `SameSite=Lax`. Lax y no Strict a propósito: con Strict el navegador no la enviaría en el redirect de vuelta desde el cliente, y el salto entre aplicaciones nunca ocurriría.
+
+### Servicios
+
+| Servicio | Responsabilidad |
+|---|---|
+| `LlaveFirmaService` | Genera pares RSA/EC, cifra la privada en reposo, rota con periodo de gracia, publica el JWKS |
+| `TokenService` | Emite access/id/refresh, rota con detección de reúso |
+| `AutorizacionService` | Registro de clientes, validación PKCE, ciclo del código de autorización |
+| `CredencialesService` | Login, bloqueo por fuerza bruta, 2FA, dispositivos confiables |
+| `SesionSsoService` | La sesión del proveedor: lo que hace posible el salto entre apps |
+| `InvitacionService` | Alta por deeplink, con validación del dígito de control de la CLABE |
+| `RecuperacionService` | Restablecimiento por enlace de un solo uso |
+
+### Tres decisiones de fondo
+
+**Firma asimétrica, nunca HMAC.** La API valida con la llave pública. Con un secreto compartido, comprometer la API permitiría además *emitir* tokens, y la extracción del módulo dejaría de ser posible sin tocar ambos lados.
+
+**Llave privada cifrada con AES-256-GCM y llave maestra fuera de la base.** Si ambas vivieran en el mismo lugar, un volcado bastaría para firmar tokens arbitrarios. GCM y no CBC porque es autenticado: detecta manipulación en vez de devolver basura que parece una llave.
+
+**El JWKS publica activas y retiradas, nunca revocadas.** "Retirada" = ya no firma pero sus tokens valen hasta expirar; sacarla cerraría todas las sesiones vivas. "Revocada" = se comprometió, y debe dejar de validar de inmediato.
+
+### Las pantallas del proveedor
+
+Las siete (S1–S7) se sirven como HTML generado en el servidor, desde `pantallas.ts`. Sin framework de plantillas ni bundle: son formularios sin estado que se abren en el navegador del sistema y tienen que cargar rápido en el WiFi de un salón.
+
+Todo valor que viene de la petición pasa por `esc()`. El correo se repinta en el formulario tras un fallo, y sin escapar sería un XSS **en el origen del proveedor** — justo donde vive la cookie de sesión. Hay una prueba que lo fija.
+
+### Alta del mesero
+
+El mesero nunca se registra solo: el capitán invita, y el deeplink es lo único que permite crear la cuenta. La invitación vive 72 h, se guarda hasheada y es de un solo uso.
+
+El registro crea `USUARIO` y `DATOS_BANCARIOS` en **una sola transacción**, pero los datos viven separados: la CLABE nunca toca las tablas de autenticación. Se valida el dígito de control con el algoritmo del Banco de México — una CLABE mal tecleada que pasa a nómina termina en una transferencia rechazada o, peor, enviada a la cuenta de otra persona.
+
+### Recuperación de contraseña
+
+Restablecer **cierra todas las sesiones abiertas y levanta los bloqueos**. Quien recupera su contraseña suele sospechar que su cuenta está comprometida; dejar vivas las sesiones anteriores permitiría al intruso seguir dentro con un refresh token que ya no depende de esa contraseña.
+
+La respuesta es idéntica exista o no el correo (SSO-0002), y hay una prueba que compara los dos HTML byte a byte.
+
+### El patrón que hay que respetar al escribir servicios
+
+Tres bugs de la misma familia aparecieron al escribir las pruebas, y los tres eran explotables:
+
+```ts
+// ❌ El throw hace rollback y DESHACE la revocación
+await db.transaction(async (trx) => {
+  if (tokenReusado) {
+    await revocarCadena(trx)      // se pierde
+    throw new SsoError('SSO-1007')
+  }
+})
+
+// ✅ Marcar dentro, aplicar fuera
+let reusoDeUsuario: number | null = null
+try {
+  return await db.transaction(async (trx) => {
+    if (tokenReusado) { reusoDeUsuario = idUsuario; throw new SsoError('SSO-1007') }
+  })
+} finally {
+  if (reusoDeUsuario !== null) await this.revocarCadena(reusoDeUsuario)
+}
+```
+
+Afectaba a la revocación por reúso de refresh token, a la del segundo canje de código, y al contador de intentos del código 2FA. **Este último es el peor**: el contador nunca subía, así que el límite de 5 intentos no existía y un código de seis dígitos se podía adivinar por fuerza bruta sin freno.
+
+Regla general: **si un efecto debe sobrevivir al `throw`, no puede vivir en la transacción que el `throw` revierte.**
+
+### Cuidado con `response.redirect()`
+
+AdonisJS reenvía la query string de la petición original, así que un destino que ya lleva parámetros termina con dos signos de interrogación:
+
+```
+/interno/login?ticket=abc?response_type=code&client_id=…
+```
+
+El ticket queda contaminado y el flujo se rompe en el primer paso. Los controladores de identidad usan un helper `redirigir()` que arma el 302 a mano. **Aplica a cualquier redirect con parámetros en el resto del proyecto.**
+
+### Comandos
+
+```bash
+node ace sso:rotar-llave     # obligatorio antes del primer login
+node ace sso:purgar          # tarea diaria: flujos y códigos vencidos
+node ace sso:demo            # solo desarrollo: siembra usuarios de prueba
+```
+
+`sso:purgar` **no** borra `INTENTO_LOGIN`, `BLOQUEO_CUENTA` ni `REFRESH_TOKEN`. Los dos primeros son la evidencia para investigar un incidente; el tercero tiene que seguir existiendo para poder **detectar** su reúso — borrarlo haría que un token robado se viera igual que uno inventado.
+
+---
+
+## Servicios de dominio
+
+Escritos y probados: **eventos, participaciones y confirmación de llegada**. Cada regla del diccionario tiene su prueba en `tests/unit/dominio_reglas.spec.ts`.
+
+### Dos máquinas de estados
+
+El orden del enumerado **es** la secuencia válida; las transiciones fuera de orden responden SGEB-4011.
+
+```
+EVENTO         borrador → publicado → en_curso → finalizado
+                    ↘         ↘          ↘      cancelado
+PARTICIPACION  aparto → seleccionado → confirmo_asistencia →
+               confirmo_llegada → asignado → vinculo → salida
+```
+
+`finalizado`, `cancelado` y `salida` son terminales: de ellos cuelgan pagos ya calculados.
+
+### Reglas cubiertas
+
+| Código | Regla |
+|---|---|
+| SGEB-4001 | El salón no admite dos eventos vigentes el mismo día. En borrador todavía no ocupa: es un plan, no un compromiso |
+| SGEB-4002 | Cupo lleno. El conteo va dentro de la transacción con `forUpdate` |
+| SGEB-4005 | Sin checklist de montaje aprobado no hay asignación de mesas |
+| SGEB-4006 | Una mesa, un mesero a la vez |
+| SGEB-4007 | `num_mesas` no excede la capacidad del salón |
+| SGEB-4011 | Transiciones inválidas, y el doble apartado del mismo evento |
+| SGEB-4013 | Operar sobre un evento en el estado equivocado |
+| SGEB-4020 | El mesero no libera su lugar a menos de 12 h del inicio |
+| SGEB-4003/4004/4024/4025/4026 | Confirmación de llegada (ver abajo) |
+
+### Decisiones que vale la pena conocer
+
+**Publicar exige al menos una mesa.** Sin mesas no hay QR que escanear ni nada que asignar.
+
+**El radio de geocerca solo se edita en borrador.** Cambiarlo después invalidaría retroactivamente asistencias ya confirmadas, y de esas asistencias dependen pagos.
+
+**El QR lo genera el servidor.** Aceptarlo del cliente permitiría fijar un código conocido y suplantar la mesa de otro evento. Regenerarlo invalida el anterior de inmediato (SGEB-3003).
+
+**Vincular exige escanear el QR de esa mesa.** El código está impreso en la mesa, así que vincular implica haber estado ahí. Aceptar el QR de otra rompería esa evidencia.
+
+**Liberar una mesa no borra la asignación.** El histórico de quién atendió qué mesa es lo que permite resolver una queja del comensal después del evento.
+
+**`inicio` tiene que caer el mismo día que `fecha`.** Si no, el cronograma y la ventana de llegada se calculan contra días distintos y los meseros reciben avisos el día equivocado.
+
+### Confirmación de llegada
+
+El orden de las verificaciones importa, y va de lo específico a lo genérico: dispositivo → biometría → precisión del GPS → geocerca. Si se revisara la geocerca primero, alguien usando el teléfono de un compañero vería "acércate al recinto" estando dentro.
+
+**La distancia se calcula en el servidor** (Haversine) y nunca se acepta del cliente: si la app enviara la distancia ya resuelta, bastaría con mandar "estoy a 3 metros" para saltarse la geocerca sin siquiera falsear el GPS.
+
+**Todo intento queda registrado, exitoso o no.** Los fallidos son la evidencia con la que el capitán resuelve una disputa de asistencia, y de la asistencia depende el pago.
+
+SGEB-4026 se distingue de SGEB-4003 a propósito: uno afirma que el mesero está fuera, el otro admite que no se pudo determinar. Tratar una medición inconcluyente como asistencia denegada produce disputas que el registro no puede resolver.
+
+### Nueva traducción en el manejador de excepciones
+
+Las violaciones de `CHECK` (código `23514`) ahora se traducen a **SGEB-2008** en vez de caer en SGEB-5001. Llegar hasta la base significa que faltó un guardián en el servicio, pero el usuario sí puede corregir lo que capturó; el `technical_message` nombra el constraint para que el equipo sepa qué validación agregar.
+
+Salió de una prueba real: finalizar un evento cuyo `inicio` estaba en el futuro reventaba contra `evento_fin_posterior_a_inicio` y devolvía un error técnico sobre algo perfectamente entendible.
+
+---
+
+### API expuesta
+
+Los servicios ya tienen controladores, validadores y rutas.
+
+| Grupo | Middleware | Rutas |
+|---|---|---|
+| Publico (comensal por QR) | ninguno | `/v1/publico/mesas/:codigo_qr` |
+| Cualquier rol autenticado | auth, sujeto | perfil propio, consulta de eventos y participaciones |
+| Capitan y admin | auth, sujeto, rol | salones, alta y edicion de eventos, mesas, asignaciones |
+| Mesero | auth, sujeto, rol | apartar, liberar, confirmar llegada, vincular mesa |
+
+Dos decisiones que se ven en el reparto:
+
+**El capitan solo ve sus eventos; el admin ve todos.** Se resuelve en el controlador y no en el servicio, porque depende de quien pregunta, no de la regla en si.
+
+**Vincular la mesa es del mesero, no del capitan.** El capitan asigna desde el panel; vincular exige escanear el QR impreso, y eso solo lo puede hacer quien esta parado frente a la mesa.
+
+### Como se validan las entradas
+
+Los validadores de VineJS cubren formato, longitudes y rangos, con los limites del Diccionario. Las reglas que dependen de **otros datos** (que el salon este libre, que las mesas quepan, que el capitan tenga el rol) no caben ahi: necesitan consultar la base y viven en el servicio, con su propio codigo de negocio.
+
+El manejador global mapea cada regla de VineJS a su codigo:
+
+```
+titulo ausente        -> SGEB-2001    tipo: 'boda'          -> SGEB-2004
+titulo: 'ab'          -> SGEB-2003    radioGeocercaM: 5000  -> SGEB-2012
+```
+
+Y `data.errores_campos` conserva el detalle, porque el frontend pinta el error bajo cada campo.
+
+### De donde salen las llaves para validar el JWT
+
+`SSO_JWKS_MODE` decide el transporte:
+
+- `local` — se leen de la base, en el mismo proceso. Es lo correcto hoy: pedirse el JWKS por HTTP a uno mismo obligaria a estar escuchando para validar el primer token, lo que rompe las pruebas y complica el arranque.
+- `remoto` — se piden por HTTP al proveedor, como se haria contra Keycloak o Auth0. Es el modo definitivo.
+
+**Lo que no cambia entre modos es la validacion**: mismo algoritmo, mismo emisor, misma audiencia, misma verificacion de firma. Al extraer el modulo se pone `remoto` y ya. Es la misma costura que `IdentidadLocal` / `IdentidadRemota`.
+
+### `import type` rompe la inyeccion de dependencias
+
+```ts
+// MAL: el contenedor no puede inyectarlo
+import type { IdentidadService } from '#modules/identidad/identidad_service'
+
+// BIEN
+import { IdentidadService } from '#modules/identidad/identidad_service'
+```
+
+El contenedor lee los metadatos que TypeScript emite para los parametros del constructor. `import type` se borra al compilar, asi que el metadato queda como `Object` y la inyeccion falla en tiempo de ejecucion con `Cannot inject [Function: Object]`.
+
+**El typecheck no lo detecta**, porque a nivel de tipos todo cuadra. Solo aparece al pasar por HTTP con el contenedor resolviendo de verdad. Aplica a cualquier clase que se inyecte, en todo el proyecto.
+
+---
+
 ## Lo que falta
 
-1. **Módulo de identidad** — proveedor OAuth 2.1 + PKCE (Entorno v0.4 §8.4). El más largo.
-3. **Módulos de dominio** — eventos → participaciones → menú → órdenes → cierre.
-4. **Cubaitor** — cliente MQTT suscrito al broker del VPS 4.
+1. **Correo** para códigos 2FA, invitaciones y recuperación. Hoy el código se escribe en el log fuera de producción (`[DEV] Codigo de verificacion: 123456`), que es lo que permite desarrollar sin servidor de correo.
+2. **Endpoint de invitación para el capitán** — el servicio existe y está probado; falta exponerlo con validador y permisos.
+3. **Menú, órdenes, Cubaitor y cierre** — quedan por escribir sus servicios, controladores y rutas.
 5. **Dashboard** — al final: agrega lo que los demás producen.
-6. **Pruebas funcionales** por endpoint. `@japa/openapi-assertions` permite validar las respuestas contra `openapi-sgeb.yaml` directamente.
-7. **Alinear la discrepancia #6** (`entregada` vs `servida`) entre Diccionario y OpenAPI.
+6. **Gestión de dispositivos y sesiones** desde el perfil del usuario.
 
 ---
 

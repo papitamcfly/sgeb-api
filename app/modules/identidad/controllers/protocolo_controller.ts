@@ -5,6 +5,8 @@ import { SsoError } from '#modules/identidad/errores_sso'
 import { LlaveFirmaService } from '#modules/identidad/services/llave_firma_service'
 import { TokenService, type TokensEmitidos } from '#modules/identidad/services/token_service'
 import { AutorizacionService, CLIENTES } from '#modules/identidad/services/autorizacion_service'
+import { SesionSsoService } from '#modules/identidad/services/sesion_sso_service'
+import * as P from '#modules/identidad/pantallas'
 import Usuario from '#modules/identidad/models/usuario'
 
 /**
@@ -20,12 +22,27 @@ import Usuario from '#modules/identidad/models/usuario'
  * La trazabilidad interna se conserva con la extensión `sso_code`, que las
  * librerías estándar ignoran por ser un campo desconocido.
  */
+/**
+ * Redirección explícita.
+ *
+ * `response.redirect(url)` de AdonisJS reenvía la query string de la petición
+ * original, así que un destino que ya lleva parámetros termina con dos signos
+ * de interrogación: `/interno/login?ticket=abc?response_type=code&...`. El
+ * ticket queda contaminado y el flujo se rompe en el primer paso.
+ *
+ * Se construye el 302 a mano para que el destino sea exactamente el que se pide.
+ */
+function redirigir(response: HttpContext['response'], url: string) {
+  return response.status(302).header('location', url).send('')
+}
+
 @inject()
 export default class ProtocoloController {
   constructor(
     private llaves: LlaveFirmaService,
     private tokens: TokenService,
-    private autorizacion: AutorizacionService
+    private autorizacion: AutorizacionService,
+    private sesion: SesionSsoService
   ) {}
 
   /**
@@ -64,7 +81,8 @@ export default class ProtocoloController {
    * redirige: mandar al usuario a una URL no verificada convertiría al
    * proveedor en un redirector abierto.
    */
-  async authorize({ request, response }: HttpContext) {
+  async authorize(ctx: HttpContext) {
+    const { request, response } = ctx
     const q = request.qs()
 
     let cliente
@@ -72,10 +90,10 @@ export default class ProtocoloController {
       cliente = this.autorizacion.validarCliente(q.client_id, q.redirect_uri)
     } catch (error) {
       const e = error as SsoError
-      return response.status(e.httpStatus).send(
-        `<!doctype html><meta charset="utf-8"><title>Error de autorización</title>` +
-          `<p>${e.message}</p><p><small>${e.codigo}</small></p>`
-      )
+      return response
+        .status(e.httpStatus)
+        .type('html')
+        .send(P.pantallaError({ mensaje: e.message, codigo: e.codigo }))
     }
 
     // A partir de aquí el retorno está verificado: los errores sí redirigen.
@@ -99,22 +117,47 @@ export default class ProtocoloController {
       const ticket = await this.autorizacion.crearFlujo(solicitud)
 
       /**
-       * Aquí el proveedor evaluaría su cookie de sesión SSO: con sesión vigente
-       * salta directo al código sin preguntar nada, que es literalmente el
-       * inicio de sesión único en funcionamiento. Con `prompt=none` y sin
-       * sesión, responde `login_required` sin mostrar interfaz.
-       *
-       * Pendiente: la interfaz de credenciales (wireframes S1, S3, S5–S7), que
-       * el proveedor debe servir en su propio origen.
+       * ══════════════════════════════════════════════════════════════════
+       *  AQUÍ OCURRE EL SINGLE SIGN-ON
+       * ══════════════════════════════════════════════════════════════════
+       * Con sesión del proveedor vigente y `prompt` distinto de `login`, no se
+       * pregunta nada: se emite el código y se redirige. Ese salto es,
+       * literalmente, el inicio de sesión único. Sin él, cada aplicación
+       * volvería a autenticar y esto sería un login centralizado, no un SSO.
        */
-      return response.redirect(`/interno/login?ticket=${encodeURIComponent(ticket)}&cliente=${cliente.tipo}`)
+      const sesion = q.prompt === 'login' ? null : await this.sesion.vigente(ctx)
+
+      if (sesion) {
+        const { code, state, redirectUri } = await this.autorizacion.emitirCodigo(
+          ticket,
+          sesion.idUsuario
+        )
+        const destino = new URL(redirectUri)
+        destino.searchParams.set('code', code)
+        destino.searchParams.set('state', state)
+        return redirigir(response, destino.toString())
+      }
+
+      /**
+       * `prompt=none` exige sesión vigente y no debe mostrar interfaz: es la
+       * renovación silenciosa del cliente web. `login_required` no es un error
+       * — es la respuesta esperada, y el cliente reacciona abriendo el flujo
+       * completo en una ventana visible.
+       */
+      if (q.prompt === 'none') {
+        throw new SsoError('SSO-1017', {
+          tecnico: `prompt=none sin sesión SSO vigente para client_id=${cliente.clientId}.`,
+        })
+      }
+
+      return redirigir(response, `/interno/login?ticket=${encodeURIComponent(ticket)}`)
     } catch (error) {
       const e = error as SsoError
       const url = new URL(q.redirect_uri)
       url.searchParams.set('error', e.oauth ?? 'invalid_request')
       url.searchParams.set('error_description', e.message)
       if (q.state) url.searchParams.set('state', q.state)
-      return response.redirect(url.toString())
+      return redirigir(response, url.toString())
     }
   }
 
@@ -198,19 +241,23 @@ export default class ProtocoloController {
    * Cierre de sesión ÚNICO: destruye la sesión del proveedor y revoca la cadena.
    * Para cerrar solo esta aplicación existe POST /token/revoke.
    */
-  async logout({ request, response }: HttpContext) {
+  async logout(ctx: HttpContext) {
+    const { request, response } = ctx
     const q = request.qs()
-    response.clearCookie('sso_session')
+
+    /** Cierre ÚNICO: destruye la sesión del proveedor y revoca la cadena. */
+    const idUsuario = await this.sesion.destruir(ctx)
+    if (idUsuario) await this.tokens.revocarCadena(idUsuario)
 
     const destino = q.post_logout_redirect_uri
     const cliente = CLIENTES[q.client_id ?? '']
     if (destino && cliente?.postLogoutRedirectUris.includes(destino)) {
       const url = new URL(destino)
       if (q.state) url.searchParams.set('state', q.state)
-      return response.redirect(url.toString())
+      return redirigir(response, url.toString())
     }
 
-    return response.send('<!doctype html><meta charset="utf-8"><p>Sesión cerrada.</p>')
+    return response.type('html').send(P.pantallaSesionCerrada())
   }
 
   /**

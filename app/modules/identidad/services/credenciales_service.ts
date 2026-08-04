@@ -1,6 +1,8 @@
 import { DateTime } from 'luxon'
 import { randomInt, createHash, randomBytes } from 'node:crypto'
+import app from '@adonisjs/core/services/app'
 import hash from '@adonisjs/core/services/hash'
+import logger from '@adonisjs/core/services/logger'
 import db from '@adonisjs/lucid/services/db'
 import Usuario from '#modules/identidad/models/usuario'
 import IntentoLogin, { type MotivoFallo } from '#modules/identidad/models/intento_login'
@@ -183,7 +185,21 @@ export class CredencialesService {
       )
     })
 
-    // TODO: enviar por correo. Falla → SSO-5003 y el código queda inservible.
+    /**
+     * Envio por correo: pendiente. Si el proveedor de correo falla, responde
+     * SSO-5003 y el codigo queda inservible: no se debe reutilizar uno que el
+     * usuario nunca recibio.
+     *
+     * Fuera de produccion se escribe en el log. Sin servidor de correo local no
+     * habria forma de completar el flujo al desarrollar, y la alternativa
+     * (desactivar el segundo factor en desarrollo) haria que se probara un
+     * flujo distinto del que corre en produccion, que es justo donde aparecen
+     * los errores de cableado.
+     */
+    if (!app.inProduction) {
+      logger.info({ correo: usuario.correo, proposito }, `[DEV] Codigo de verificacion: ${codigo}`)
+    }
+
     return codigo
   }
 

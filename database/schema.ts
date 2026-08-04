@@ -399,7 +399,7 @@ export class EventoSchema extends BaseModel {
 }
 
 export class FlujoAutorizacionSchema extends BaseModel {
-  static $columns = ['clientId', 'codeChallenge', 'consumido', 'creadoEn', 'expiraEn', 'idFlujo', 'nonce', 'redirectUri', 'scope', 'state', 'ticketHash'] as const
+  static $columns = ['clientId', 'codeChallenge', 'consumido', 'creadoEn', 'expiraEn', 'idFlujo', 'idUsuarioPendiente', 'nonce', 'redirectUri', 'scope', 'state', 'ticketHash'] as const
   $columns = FlujoAutorizacionSchema.$columns
   @column()
   declare clientId: string
@@ -413,6 +413,8 @@ export class FlujoAutorizacionSchema extends BaseModel {
   declare expiraEn: DateTime
   @column({ isPrimary: true })
   declare idFlujo: number
+  @column()
+  declare idUsuarioPendiente: number | null
   @column()
   declare nonce: string
   @column()
@@ -765,6 +767,27 @@ export class SalonSchema extends BaseModel {
   declare longitud: string
   @column()
   declare nombre: string
+}
+
+export class SesionSsoSchema extends BaseModel {
+  static $columns = ['cookieHash', 'creadoEn', 'expiraEn', 'idSesion', 'idUsuario', 'metodoLogin', 'revocada', 'sid'] as const
+  $columns = SesionSsoSchema.$columns
+  @column()
+  declare cookieHash: string
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column.dateTime()
+  declare expiraEn: DateTime
+  @column({ isPrimary: true })
+  declare idSesion: number
+  @column()
+  declare idUsuario: number
+  @column()
+  declare metodoLogin: any
+  @column()
+  declare revocada: boolean
+  @column()
+  declare sid: string
 }
 
 export class SolicitudServicioSchema extends BaseModel {

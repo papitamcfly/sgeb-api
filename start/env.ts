@@ -31,6 +31,12 @@ export default await Env.create(new URL('../', import.meta.url), {
    * dejaría de ser posible sin tocar ambos lados.
    */
   SSO_JWKS_URL: Env.schema.string({ format: 'url' }),
+  /**
+   * `local` mientras el proveedor comparta proceso con la API; `remoto` tras la
+   * extracción. Solo cambia el transporte de las llaves: la validación (firma,
+   * emisor, audiencia, algoritmo) es idéntica en ambos modos.
+   */
+  SSO_JWKS_MODE: Env.schema.enum(['local', 'remoto'] as const),
   /** Debe coincidir con el claim `iss`. Un token de otro emisor se rechaza. */
   SSO_ISSUER: Env.schema.string({ format: 'url' }),
   /** Claim `aud`. Un token emitido para otro destinatario no sirve aquí. */

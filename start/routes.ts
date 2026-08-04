@@ -14,8 +14,6 @@ import { middleware } from './kernel.js'
  *    problema de formato (SGEB-2002), no de recurso inexistente (SGEB-3001).
  */
 
-const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-
 /**
  * ══════════════════════════════════════════════════════════════════════════
  *  PROVEEDOR DE IDENTIDAD — sin prefijo /v1 y sin envelope.
@@ -34,6 +32,29 @@ router.get('/userinfo', '#modules/identidad/controllers/protocolo_controller.use
 router.get('/logout', '#modules/identidad/controllers/protocolo_controller.logout')
 router.post('/token/revoke', '#modules/identidad/controllers/protocolo_controller.revocar')
 
+/**
+ * Pantallas del proveedor (wireframes S1–S7). Mismo origen que /authorize.
+ *
+ * NINGUNA aplicación cliente llama a estas rutas: las consume la propia
+ * interfaz del proveedor. Una petición a /interno/login desde el panel React o
+ * desde iOS significa que esa aplicación está manipulando la contraseña del
+ * usuario, que es justo lo que este flujo existe para evitar.
+ */
+router
+  .group(() => {
+    router.get('/login', '#modules/identidad/controllers/interno_controller.mostrarLogin')
+    router.post('/login', '#modules/identidad/controllers/interno_controller.login')
+    router.post('/verificacion', '#modules/identidad/controllers/interno_controller.verificacion')
+    router.get('/verificacion/reenviar', '#modules/identidad/controllers/interno_controller.reenviar')
+    router.get('/registro', '#modules/identidad/controllers/interno_controller.mostrarRegistro')
+    router.post('/registro', '#modules/identidad/controllers/interno_controller.registro')
+    router.get('/recuperar', '#modules/identidad/controllers/interno_controller.mostrarRecuperar')
+    router.post('/recuperar', '#modules/identidad/controllers/interno_controller.recuperar')
+    router.get('/recuperar/nueva', '#modules/identidad/controllers/interno_controller.mostrarNuevaPassword')
+    router.post('/recuperar/confirmar', '#modules/identidad/controllers/interno_controller.confirmarRecuperacion')
+  })
+  .prefix('/interno')
+
 router
   .group(() => {
     // ---------------------------------------------------------------- pública
@@ -41,7 +62,6 @@ router
     router
       .group(() => {
         router.get('/mesas/:codigo_qr', '#modules/eventos/controllers/publico_controller.mesa')
-        router.post('/mesas/:codigo_qr/solicitudes', '#modules/eventos/controllers/publico_controller.solicitar')
       })
       .prefix('/publico')
 
@@ -50,37 +70,50 @@ router
     router
       .group(() => {
         router.get('/usuarios/me', '#modules/identidad/controllers/perfil_controller.mostrar')
-        router.put('/usuarios/me', '#modules/identidad/controllers/perfil_controller.actualizar')
-        router.get('/usuarios/me/datos-bancarios', '#modules/identidad/controllers/datos_bancarios_controller.mostrarPropio')
-        router.post('/usuarios/me/datos-bancarios', '#modules/identidad/controllers/datos_bancarios_controller.registrarPropio')
       })
       .use([middleware.auth(), middleware.sujeto()])
 
-    // ---------------------------------------------------------------- administrativa
-    // Añade `rol`: el endpoint completo está vedado a los meseros.
+    // ---------------------------------------------------------------- capitán y admin
     router
       .group(() => {
-        router.get('/usuarios', '#modules/identidad/controllers/usuarios_controller.listar')
-        router
-          .get('/usuarios/:uuid_usuario', '#modules/identidad/controllers/usuarios_controller.mostrar')
-          .where('uuid_usuario', UUID_V4)
-
+        router.get('/salones', '#modules/eventos/controllers/salones_controller.listar')
         router.post('/salones', '#modules/eventos/controllers/salones_controller.crear')
+        router.get('/salones/:id', '#modules/eventos/controllers/salones_controller.mostrar')
         router.put('/salones/:id', '#modules/eventos/controllers/salones_controller.actualizar')
         router.delete('/salones/:id', '#modules/eventos/controllers/salones_controller.desactivar')
 
-        router.get('/dashboard/capitan', '#modules/dashboard/controllers/dashboard_controller.capitan')
-        router.get('/eventos/:id_evento/dashboard', '#modules/dashboard/controllers/dashboard_controller.evento')
+        router.post('/eventos', '#modules/eventos/controllers/eventos_controller.crear')
+        router.put('/eventos/:id_evento', '#modules/eventos/controllers/eventos_controller.actualizar')
+        router.patch('/eventos/:id_evento/estado', '#modules/eventos/controllers/eventos_controller.cambiarEstado')
+
+        router.post('/eventos/:id_evento/mesas', '#modules/eventos/controllers/eventos_controller.agregarMesa')
+        router.delete('/eventos/:id_evento/mesas/:id_mesa', '#modules/eventos/controllers/eventos_controller.eliminarMesa')
+        router.post('/eventos/:id_evento/mesas/:id_mesa/regenerar-qr', '#modules/eventos/controllers/eventos_controller.regenerarQr')
+
+        router.patch('/participaciones/:id_participacion/estado', '#modules/participaciones/controllers/participaciones_controller.cambiarEstado')
+        router.post('/participaciones/:id_participacion/asignaciones', '#modules/participaciones/controllers/participaciones_controller.asignarMesa')
+        router.delete('/asignaciones/:id_asignacion', '#modules/participaciones/controllers/participaciones_controller.liberarMesa')
       })
       .use([middleware.auth(), middleware.sujeto(), middleware.rol(['capitan', 'admin'])])
+
+    // ---------------------------------------------------------------- cualquier rol autenticado
+    // Consultas que los tres roles necesitan; el filtrado por pertenencia lo
+    // hace el controlador según quién pregunta.
+    router
+      .group(() => {
+        router.get('/eventos', '#modules/eventos/controllers/eventos_controller.listar')
+        router.get('/eventos/:id_evento', '#modules/eventos/controllers/eventos_controller.mostrar')
+        router.get('/eventos/:id_evento/participaciones', '#modules/participaciones/controllers/participaciones_controller.listar')
+      })
+      .use([middleware.auth(), middleware.sujeto()])
 
     // ---------------------------------------------------------------- mesero en piso
     router
       .group(() => {
-        router.post(
-          '/participaciones/:id_participacion/confirmacion-llegada',
-          '#modules/participaciones/controllers/llegada_controller.confirmar'
-        )
+        router.post('/eventos/:id_evento/participaciones', '#modules/participaciones/controllers/participaciones_controller.apartar')
+        router.delete('/participaciones/:id_participacion', '#modules/participaciones/controllers/participaciones_controller.liberar')
+        router.post('/participaciones/:id_participacion/confirmacion-llegada', '#modules/participaciones/controllers/participaciones_controller.confirmarLlegada')
+        router.patch('/asignaciones/:id_asignacion/vincular', '#modules/participaciones/controllers/participaciones_controller.vincularMesa')
       })
       .use([middleware.auth(), middleware.sujeto(), middleware.rol(['mesero'])])
   })

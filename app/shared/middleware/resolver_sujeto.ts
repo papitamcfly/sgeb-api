@@ -1,7 +1,19 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import type { NextFn } from '@adonisjs/core/types/http'
 import { inject } from '@adonisjs/core'
-import type { IdentidadService, UsuarioResuelto } from '#modules/identidad/identidad_service'
+/**
+ * `IdentidadService` se importa como VALOR, no con `import type`.
+ *
+ * El contenedor resuelve las dependencias leyendo los metadatos que TypeScript
+ * emite para los parámetros del constructor. `import type` se borra al compilar,
+ * así que el metadato queda como `Object` y la inyección falla en tiempo de
+ * ejecución con "Cannot inject [Function: Object]" — un error que el typecheck
+ * no puede ver, porque a nivel de tipos todo cuadra.
+ *
+ * `UsuarioResuelto` sí es solo un tipo y va aparte.
+ */
+import { IdentidadService } from '#modules/identidad/identidad_service'
+import type { UsuarioResuelto } from '#modules/identidad/identidad_service'
 
 /**
  * Traduce el UUID del token al usuario interno, UNA sola vez por petición.
