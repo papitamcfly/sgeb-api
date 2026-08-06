@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon'
 import db from '@adonisjs/lucid/services/db'
+import emitter from '@adonisjs/core/services/emitter'
 import { inject } from '@adonisjs/core'
 import Orden from '#modules/ordenes/models/orden'
 import OrdenDetalle from '#modules/ordenes/models/orden_detalle'
@@ -138,7 +139,15 @@ export class OrdenService {
       }
 
       await orden.load('detalles')
-      return orden
+      return { orden, idEvento: mesa.idEvento }
+    }).then((r) => {
+      emitter.emit('orden:cambio', {
+        idEvento: r.idEvento,
+        idOrden: r.orden.id,
+        idMesa: r.orden.idMesa,
+        estado: r.orden.estado,
+      })
+      return r.orden
     })
   }
 
@@ -167,7 +176,16 @@ export class OrdenService {
      * identidad. Regla general: si un efecto debe sobrevivir al `throw`, no
      * puede vivir en la transacción que el `throw` revierte.
      */
-    let pausar: { idOrden: number; idDetalle: number } | null = null
+    let pausar: {
+      idOrden: number
+      idDetalle: number
+      idEvento: number
+      idMesa: number
+      idInsumo: number
+      nombreInsumo: string
+      motivo: 'botella_vacia' | 'sin_configuracion'
+      codigo: 'SGEB-4008' | 'SGEB-4009'
+    } | null = null
 
     try {
       return await db.transaction(async (trx) => {
@@ -214,7 +232,13 @@ export class OrdenService {
            * este evento. Se pausa igual que si estuviera agotado: el resultado
            * para el comensal es el mismo, y el capitán tiene que actuar.
            */
-          pausar = { idOrden: orden.id, idDetalle: detalle.id }
+          const ins = await trx.from('insumo').where('id_insumo', v.idInsumo).first()
+          pausar = {
+            idOrden: orden.id, idDetalle: detalle.id, idEvento: mesa.idEvento,
+            idMesa: orden.idMesa, idInsumo: v.idInsumo,
+            nombreInsumo: ins?.nombre ?? `insumo ${v.idInsumo}`,
+            motivo: 'sin_configuracion', codigo: 'SGEB-4008',
+          }
           throw new SgebError('SGEB-4008', {
             tecnico:
               `INSUMO id=${v.idInsumo} sin CONFIG_DISPENSADO activa en evento ${mesa.idEvento}. ` +
@@ -224,7 +248,13 @@ export class OrdenService {
 
         // ── SGEB-4009: umbral matemático de botella vacía ───────────────
         if (config.volumenDisponibleMl < mlTotal) {
-          pausar = { idOrden: orden.id, idDetalle: detalle.id }
+          const ins2 = await trx.from('insumo').where('id_insumo', v.idInsumo).first()
+          pausar = {
+            idOrden: orden.id, idDetalle: detalle.id, idEvento: mesa.idEvento,
+            idMesa: orden.idMesa, idInsumo: v.idInsumo,
+            nombreInsumo: ins2?.nombre ?? `insumo ${v.idInsumo}`,
+            motivo: 'botella_vacia', codigo: 'SGEB-4009',
+          }
           throw new SgebError('SGEB-4009', {
             tecnico:
               `volumen_solicitado_ml=${mlTotal} > volumen_disponible_ml=` +
@@ -269,6 +299,10 @@ export class OrdenService {
 
       return {
         id_detalle: detalle.id,
+        idEvento: mesa.idEvento,
+        idOrden: orden.id,
+        idMesa: orden.idMesa,
+        estadoOrden: orden.estado,
         instrucciones: dispensados.map((d, i) => ({
           id_dispensado: d.id,
           pin_gpio: planes[i].config.pinGpio,
@@ -279,9 +313,44 @@ export class OrdenService {
       })
     } finally {
       if (pausar !== null) {
-        const p = pausar as { idOrden: number; idDetalle: number }
+        const p = pausar as {
+          idOrden: number
+          idDetalle: number
+          idEvento: number
+          idMesa: number
+          idInsumo: number
+          nombreInsumo: string
+          motivo: 'botella_vacia' | 'sin_configuracion'
+          codigo: 'SGEB-4008' | 'SGEB-4009'
+        }
         await db.from('orden_detalle').where('id_detalle', p.idDetalle).update({ estado: 'pausada_por_insumo' })
         await db.from('orden').where('id_orden', p.idOrden).update({ estado: 'pausada_por_insumo' })
+
+        /**
+         * La alerta que más importa del canal: sin tiempo real, el capitán se
+         * entera de la botella vacía cuando un mesero se lo dice, y para
+         * entonces hay órdenes acumuladas en pausa.
+         */
+        const [{ pausadas }] = await db
+          .from('orden')
+          .where('estado', 'pausada_por_insumo')
+          .whereIn('id_mesa', db.from('mesa').select('id_mesa').where('id_evento', p.idEvento))
+          .count('* as pausadas')
+
+        emitter.emit('orden:cambio', {
+          idEvento: p.idEvento,
+          idOrden: p.idOrden,
+          idMesa: p.idMesa,
+          estado: 'pausada_por_insumo',
+        })
+        emitter.emit('alerta:insumo', {
+          idEvento: p.idEvento,
+          idInsumo: p.idInsumo,
+          nombreInsumo: p.nombreInsumo,
+          motivo: p.motivo,
+          codigo: p.codigo,
+          ordenesPausadas: Number(pausadas),
+        })
       }
     }
   }
@@ -320,6 +389,26 @@ export class OrdenService {
      */
     d.estado = real >= d.volumenSolicitadoMl * 0.9 ? 'ok' : 'parcial'
     await d.save()
+
+    const ctx = await db
+      .from('orden_detalle')
+      .join('orden', 'orden.id_orden', 'orden_detalle.id_orden')
+      .join('mesa', 'mesa.id_mesa', 'orden.id_mesa')
+      .where('orden_detalle.id_detalle', d.idDetalle)
+      .select('mesa.id_evento')
+      .first()
+
+    if (ctx) {
+      emitter.emit('dispensado:cambio', {
+        idEvento: ctx.id_evento,
+        idDispensado: d.id,
+        idDetalle: d.idDetalle,
+        pinGpio: config.pinGpio,
+        estado: d.estado,
+        volumenMl: real,
+        segundos: segundosReal,
+      })
+    }
     return d
   }
 
@@ -359,7 +448,16 @@ export class OrdenService {
 
       orden.estado = nuevo
       await orden.useTransaction(trx).save()
-      return orden
+      const mesa = await Mesa.findOrFail(orden.idMesa, { client: trx })
+      return { orden, idEvento: mesa.idEvento }
+    }).then((r) => {
+      emitter.emit('orden:cambio', {
+        idEvento: r.idEvento,
+        idOrden: r.orden.id,
+        idMesa: r.orden.idMesa,
+        estado: r.orden.estado,
+      })
+      return r.orden
     })
   }
 }

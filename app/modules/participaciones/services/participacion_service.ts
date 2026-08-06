@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon'
 import db from '@adonisjs/lucid/services/db'
+import emitter from '@adonisjs/core/services/emitter'
 import { inject } from '@adonisjs/core'
 import Evento from '#modules/eventos/models/evento'
 import Mesa from '#modules/eventos/models/mesa'
@@ -123,6 +124,46 @@ export class ParticipacionService {
         throw error
       }
     })
+      .then(async (p) => {
+        /**
+         * El cupo se emite DESPUÉS de que la transacción confirma. Emitir dentro
+         * anunciaría un lugar ocupado que un rollback puede deshacer, y los
+         * demás meseros verían el cupo lleno sin que nadie lo haya tomado.
+         */
+        await this.emitirCupo(idEvento)
+        emitter.emit('participacion:cambio', {
+          idEvento,
+          idParticipacion: p.id,
+          estado: p.estado,
+          checklistOk: p.checklistOk,
+        })
+        return p
+      })
+  }
+
+  /**
+   * Cuenta el cupo y lo anuncia a la sala del evento.
+   *
+   * Es lo que evita que diez meseros peleen por dos lugares y ocho se enteren
+   * hasta recibir SGEB-4002: la pantalla se actualiza sola conforme se llenan.
+   */
+  private async emitirCupo(idEvento: number): Promise<void> {
+    const evento = await Evento.find(idEvento)
+    if (!evento) return
+
+    const [{ count }] = await db
+      .from('participacion_evento')
+      .where('id_evento', idEvento)
+      .whereNot('estado', 'salida')
+      .count('* as count')
+
+    const ocupados = Number(count)
+    emitter.emit('cupo:actualizado', {
+      idEvento,
+      cupoMeseros: evento.cupoMeseros,
+      ocupados,
+      disponibles: Math.max(0, evento.cupoMeseros - ocupados),
+    })
   }
 
   /**
@@ -134,6 +175,7 @@ export class ParticipacionService {
    */
   async liberar(idParticipacion: number, uuidUsuario: string): Promise<void> {
     const usuario = await this.identidad.resolverPorUuid(uuidUsuario)
+    let idEventoLiberado: number | null = null
 
     return db.transaction(async (trx) => {
       const p = await ParticipacionEvento.query({ client: trx })
@@ -152,6 +194,7 @@ export class ParticipacionService {
       }
 
       const evento = await Evento.findOrFail(p.idEvento, { client: trx })
+      idEventoLiberado = evento.id
       const horas = evento.inicio.diff(DateTime.now(), 'hours').hours
 
       if (!['aparto', 'seleccionado'].includes(p.estado) || horas < HORAS_CANCELACION) {
@@ -163,6 +206,9 @@ export class ParticipacionService {
       }
 
       await p.useTransaction(trx).delete()
+    }).then(async () => {
+      /** El lugar liberado vuelve a estar disponible para los demás. */
+      await this.emitirCupo(idEventoLiberado!)
     })
   }
 
@@ -200,6 +246,14 @@ export class ParticipacionService {
       if (campo) (p as unknown as Record<string, DateTime>)[campo] = DateTime.now()
 
       await p.useTransaction(trx).save()
+      return p
+    }).then((p) => {
+      emitter.emit('participacion:cambio', {
+        idEvento: p.idEvento,
+        idParticipacion: p.id,
+        estado: p.estado,
+        checklistOk: p.checklistOk,
+      })
       return p
     })
   }
@@ -292,7 +346,11 @@ export class ParticipacionService {
         })
       }
 
-      if (a.vinculada) return a
+      /** Idempotente: reescanear el mismo QR no reemite ni cambia nada. */
+      if (a.vinculada) {
+        const p0 = await ParticipacionEvento.findOrFail(a.idParticipacion, { client: trx })
+        return { asignacion: a, idEvento: mesa.idEvento, idParticipacion: p0.id, estado: p0.estado, yaEstaba: true }
+      }
 
       a.vinculada = true
       a.fechaVinculacion = DateTime.now()
@@ -307,7 +365,22 @@ export class ParticipacionService {
         await p.useTransaction(trx).save()
       }
 
-      return a
+      return { asignacion: a, idEvento: mesa.idEvento, idParticipacion: p.id, estado: p.estado, yaEstaba: false }
+    }).then((r) => {
+      if (r.yaEstaba) return r.asignacion
+      emitter.emit('mesa:cambio', {
+        idEvento: r.idEvento,
+        idMesa: r.asignacion.idMesa,
+        estado: 'ocupada',
+        idParticipacion: r.idParticipacion,
+        vinculada: true,
+      })
+      emitter.emit('participacion:cambio', {
+        idEvento: r.idEvento,
+        idParticipacion: r.idParticipacion,
+        estado: r.estado,
+      })
+      return r.asignacion
     })
   }
 
@@ -342,6 +415,16 @@ export class ParticipacionService {
       await a.useTransaction(trx).save()
 
       await trx.from('mesa').where('id_mesa', a.idMesa).update({ estado: 'libre' })
+      const mesa = await Mesa.findOrFail(a.idMesa, { client: trx })
+      return { idEvento: mesa.idEvento, idMesa: mesa.id }
+    }).then((r) => {
+      emitter.emit('mesa:cambio', {
+        idEvento: r.idEvento,
+        idMesa: r.idMesa,
+        estado: 'libre',
+        idParticipacion: null,
+        vinculada: false,
+      })
     })
   }
 }

@@ -62,6 +62,10 @@ router
     router
       .group(() => {
         router.get('/mesas/:codigo_qr', '#modules/eventos/controllers/publico_controller.mesa')
+        router.post('/mesas/:codigo_qr/solicitudes', '#modules/comensal/controllers/comensal_controller.solicitar')
+        router.post('/mesas/:codigo_qr/calificaciones', '#modules/comensal/controllers/comensal_controller.calificar')
+        /** Emite el token que el navegador conserva para calificar una sola vez. */
+        router.post('/mesas/:codigo_qr/token', '#modules/comensal/controllers/comensal_controller.token')
       })
       .prefix('/publico')
 
@@ -116,6 +120,14 @@ router
         router.post('/eventos/:id_evento/config-dispensado', '#modules/cubaitor/controllers/cubaitor_controller.configurarPin')
         router.patch('/eventos/:id_evento/config-dispensado/:id_config/recarga', '#modules/cubaitor/controllers/cubaitor_controller.recargar')
 
+        /** Las calificaciones solo las ve el capitán: son evaluación del personal. */
+        router.get('/eventos/:id_evento/calificaciones', '#modules/comensal/controllers/comensal_controller.listarCalificaciones')
+
+        // ── Cronograma del evento ─────────────────────────────────────
+        router.post('/eventos/:id_evento/cronograma', '#modules/eventos/controllers/cronograma_controller.crear')
+        router.put('/eventos/:id_evento/cronograma/:id_hito', '#modules/eventos/controllers/cronograma_controller.actualizar')
+        router.delete('/eventos/:id_evento/cronograma/:id_hito', '#modules/eventos/controllers/cronograma_controller.eliminar')
+
         // ── Checklists: plantillas y aprobación ───────────────────────
         router.post('/checklists', '#modules/checklists/controllers/checklists_controller.crear')
         router.put('/checklists/:id_checklist', '#modules/checklists/controllers/checklists_controller.actualizar')
@@ -148,6 +160,13 @@ router
          * El menú lo consultan los tres roles: el mesero lo necesita para
          * levantar la orden en la mesa.
          */
+        /** El cronograma lo consulta el mesero: necesita saber cuándo toca cada tiempo. */
+        router.get('/eventos/:id_evento/cronograma', '#modules/eventos/controllers/cronograma_controller.listar')
+
+        /** Bandeja propia: el sujeto sale del token. */
+        router.get('/notificaciones', '#modules/notificaciones/controllers/notificaciones_controller.listar')
+        router.patch('/notificaciones/:id_notificacion/leida', '#modules/notificaciones/controllers/notificaciones_controller.marcarLeida')
+
         router.get('/checklists', '#modules/checklists/controllers/checklists_controller.listar')
         router.get('/checklists/:id_checklist', '#modules/checklists/controllers/checklists_controller.mostrar')
         router.get('/participaciones/:id_participacion/checklist-instancias', '#modules/checklists/controllers/checklists_controller.listarInstancias')
@@ -156,6 +175,10 @@ router
         router.get('/envases', '#modules/menu/controllers/menu_controller.listarEnvases')
 
         /** Tablero de barra: lo miran el capitán y quien esté en la barra. */
+        /** Bandeja de piso: la miran el mesero asignado y el capitán. */
+        router.get('/eventos/:id_evento/solicitudes', '#modules/comensal/controllers/comensal_controller.listarSolicitudes')
+        router.patch('/solicitudes/:id_solicitud/estado', '#modules/comensal/controllers/comensal_controller.cambiarEstado')
+
         router.get('/eventos/:id_evento/ordenes', '#modules/ordenes/controllers/ordenes_controller.listarPorEvento')
         router.get('/ordenes/:id_orden', '#modules/ordenes/controllers/ordenes_controller.mostrar')
         router.patch('/ordenes/:id_orden/estado', '#modules/ordenes/controllers/ordenes_controller.cambiarEstado')

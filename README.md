@@ -706,6 +706,131 @@ CHECKLIST_RESPUESTA  lo que ese mesero marco, item por item
 
 ---
 
+### Canal de tiempo real (socket.io)
+
+Complementa al API REST; no lo sustituye. Cuatro areas en la primera version (Entorno Tecnologico v0.6 §10.6): cupo de meseros, panel en vivo del evento, dispensado y botella vacia, y solicitudes del comensal.
+
+#### La capa de eventos de dominio
+
+Los servicios NO conocen el transporte. Publican hechos de negocio y un unico puente decide que hacer con ellos:
+
+```
+servicio  →  emitter.emit('alerta:insumo', {...})  →  puente  →  sala evento:{id}
+```
+
+Sin esa capa, las llamadas de emision acabarian dentro de `apartar`, `procesarDetalle`, `aprobar` y `confirmar`, y la regla de que un servicio no conoce la capa de transporte se rompe por la puerta de atras. Ademas cada servicio dejaria de poder probarse sin levantar un socket.
+
+`app/shared/eventos_dominio.ts` declara el registro tipado: un nombre mal escrito o una carga con la forma equivocada se detectan al compilar, no en produccion con un socket mudo.
+
+#### Los eventos se emiten DESPUES de que la transaccion confirma
+
+```ts
+return db.transaction(async (trx) => { ... })
+  .then(async (p) => {
+    await this.emitirCupo(idEvento)   // fuera de la transaccion
+    return p
+  })
+```
+
+Emitir dentro anunciaria un lugar ocupado que un rollback puede deshacer, y los demas meseros verian el cupo lleno sin que nadie lo haya tomado. Es la misma familia de cuidado que la regla de los efectos que deben sobrevivir al `throw`.
+
+#### Cuatro decisiones de seguridad
+
+**Autenticacion en el handshake, con el mismo JWT.** Un socket sin token valido se rechaza antes de unirse a nada. Mismo token, mismas llaves, mismo modo local/remoto.
+
+**El token viaja en `auth`, no en la query.** La cadena de consulta se escribe en los logs de acceso de Nginx y en el historial del navegador.
+
+**Pertenencia verificada contra la base.** Al unirse a la sala se comprueba que el capitan dirige el evento o que el mesero tiene participacion. Sin eso, cualquiera con token valido veria la operacion completa de un salon donde no trabaja. Hay pruebas que lo fijan.
+
+**El canal solo empuja; nunca recibe comandos.** Apartar, marcar checklist o dispensar se hacen por REST, que ya tiene validacion, autorizacion y envelope. Duplicar esa logica sobre sockets obligaria a mantener dos caminos con dos conjuntos de reglas.
+
+#### Por que socket.io y no SSE
+
+`@adonisjs/transmit` es de integracion nativa, pero al unirse a una sala el cliente necesita saber si quedo dentro o si fue rechazado. Con un canal unidireccional esa confirmacion no existe, y la ausencia de mensajes es indistinguible de "todavia no ha pasado nada". El acuse de recibo bidireccional resuelve exactamente eso.
+
+#### Requiere en infraestructura
+
+- **Nginx (VPS 2)**: habilitar el upgrade de conexion (`Connection: Upgrade`, `Upgrade: websocket`). Es trabajo del equipo de Servidores.
+- **`SOCKET_CORS_ORIGIN`**: origenes autorizados. Un comodin permitiria que cualquier sitio abriera un canal con el token de la victima si lograra leerlo.
+
+Con una sola instancia de AdonisJS no hace falta adaptador Redis. Si se escala a mas, si.
+
+---
+
+### Comensal
+
+La unica superficie sin autenticacion de usuario. El comensal es anonimo y su unica credencial es haber escaneado el QR impreso en la mesa. Eso obliga a dos cosas que no aplican en el resto del dominio:
+
+**Nada se identifica por quien eres, sino por que escaneaste.** El QR resuelve la mesa y el evento; el comensal no aporta identidad.
+
+**Cada escritura necesita su propio freno.** Sin cuenta no hay a quien limitar por rol ni a quien bloquear: los topes van por mesa y por token.
+
+#### Anti-spam por mesa, no por minuto
+
+SGEB-4014 rechaza una solicitud nueva mientras haya UNA pendiente en esa mesa. Es mas simple que contar peticiones por minuto y describe mejor la realidad: el comensal impaciente toca tres veces el boton, no monta un ataque. Y evita que la bandeja del mesero se llene de la misma peticion repetida.
+
+#### Por que existe `cancelada`
+
+Sin un estado terminal distinto de `atendida`, una solicitud que nadie atiende —el comensal se levanto, o pidio por error— **bloquearia la mesa para siempre** por el anti-spam: el comensal no podria volver a llamar y el mesero no podria cerrarla sin mentir diciendo que la atendio.
+
+No esta en el Diccionario (tabla 24) pero si en el OpenAPI. Es la errata E-9.
+
+#### El token del comensal lo emite el servidor
+
+`POST /publico/mesas/:codigo_qr/token` devuelve un UUID que el navegador conserva. Es lo unico que impide una segunda calificacion (SGEB-4010).
+
+Lo emite el servidor y no el cliente porque un token elegido por quien califica no serviria de nada: bastaria con inventar otro para volver a votar.
+
+**El token nunca vuelve en ninguna respuesta.** Devolverlo permitiria cruzar calificaciones con el orden de escaneo y deducir quien dijo que, que es justo lo que el anonimato debe impedir. Hay una prueba que verifica que no aparece ni siquiera serializando el modelo completo.
+
+#### Detalles que se ven en las pruebas
+
+- **La solicitud se preasigna al mesero que tiene la mesa vinculada**, para que aparezca en SU bandeja y no en una cola general que nadie siente suya. Sin mesero vinculado queda sin dueno, pero se registra igual: el comensal no debe quedarse sin poder llamar solo porque nadie tomo la mesa.
+- **El promedio de calificaciones es `null` sin datos, no cero.** Un promedio de 0 diria que el servicio fue pesimo; `null` dice que no hay datos.
+- **El capitan filtra por `puntuacion_max`**, que es el uso real: nadie revisa una lista de cincos.
+
+---
+
+### Cronograma y notificaciones
+
+El capitan define los tiempos de comida —entrada, fuerte, postre— y el sistema avisa a los meseros cuando toca. Sustituye al grito por el salon, que es como se coordina hoy.
+
+#### Idempotencia: lo que hace o rompe este modulo
+
+La tarea `cronograma:disparar` corre cada minuto durante los eventos. El proceso puede reiniciarse, y sin la bandera `disparado` los meseros recibirian "sirvan el postre" tres veces.
+
+**Peor que no avisar es avisar de mas**: el mesero deja de confiar en el aviso y empieza a ignorarlo.
+
+La bandera se marca **antes** de crear las notificaciones, dentro de la transaccion y con `forUpdate`. Si dos instancias corren a la vez, la segunda encuentra el hito ya marcado. Si la creacion de notificaciones falla, el rollback deshace tambien la marca y el siguiente ciclo lo reintenta — que es lo correcto: es peor no avisar que avisar tarde.
+
+#### Solo se notifica a quien esta en piso
+
+Los destinatarios son las participaciones en `confirmo_llegada`, `asignado` o `vinculo`. Un mesero que aparto pero no llego no necesita saber que toca el fuerte, y recibirlo lo confundiria.
+
+#### Eventos que cruzan la medianoche
+
+`hora_objetivo` es una hora del dia, no una marca temporal. Un XV que sirve el postre a las 00:30 tiene el hito con hora **menor** que el `inicio` (19:00). Sin ajuste se disparia apenas empezar el evento.
+
+La regla: si la hora objetivo cae antes del inicio, el hito es del dia siguiente. Hay una prueba que lo fija.
+
+#### Un hito disparado no se edita ni se elimina
+
+El aviso salio y los meseros ya actuaron. Editarlo reescribiria la historia del servicio (SGEB-4011); borrarlo dejaria su notificacion apuntando a un hito inexistente (SGEB-4016).
+
+#### Notificaciones
+
+La bandeja filtra por las participaciones del usuario, no por evento: un mesero solo ve lo suyo aunque trabaje en varios eventos. Marcar leida verifica la propiedad — sin eso, cualquiera podria marcar las de otro y hacer que se le pasara un tiempo de comida.
+
+Marcar leida es idempotente.
+
+#### Comando
+
+```bash
+node ace cronograma:disparar    # tarea programada, cada minuto durante eventos
+```
+
+---
+
 ## Lo que falta
 
 1. **Correo** para códigos 2FA, invitaciones y recuperación. Hoy el código se escribe en el log fuera de producción (`[DEV] Codigo de verificacion: 123456`), que es lo que permite desarrollar sin servidor de correo.

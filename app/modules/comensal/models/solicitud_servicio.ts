@@ -17,8 +17,14 @@ export default class SolicitudServicio extends BaseModel {
   @column()
   declare tipo: 'atencion' | 'cuenta' | 'otro'
 
+  /**
+   * `cancelada` no esta en el Diccionario (tabla 24) pero si en el OpenAPI, y
+   * la necesidad operativa es real: sin un estado terminal distinto de
+   * `atendida`, una solicitud que nadie atiende bloquearia la mesa para siempre
+   * por el anti-spam de SGEB-4014. Ver la migracion 010.
+   */
   @column()
-  declare estado: 'pendiente' | 'atendida'
+  declare estado: 'pendiente' | 'atendida' | 'cancelada'
 
   @column.dateTime({ autoCreate: true, columnName: 'creada_en', serializeAs: 'creada_en' })
   declare creadaEn: DateTime

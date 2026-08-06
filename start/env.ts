@@ -37,6 +37,13 @@ export default await Env.create(new URL('../', import.meta.url), {
    * emisor, audiencia, algoritmo) es idéntica en ambos modos.
    */
   SSO_JWKS_MODE: Env.schema.enum(['local', 'remoto'] as const),
+
+  /**
+   * Orígenes autorizados para abrir un socket, separados por coma. Un `*` aquí
+   * dejaría que cualquier página abriera un canal con el token de la víctima si
+   * lograra leerlo.
+   */
+  SOCKET_CORS_ORIGIN: Env.schema.string(),
   /** Debe coincidir con el claim `iss`. Un token de otro emisor se rechaza. */
   SSO_ISSUER: Env.schema.string({ format: 'url' }),
   /** Claim `aud`. Un token emitido para otro destinatario no sirve aquí. */

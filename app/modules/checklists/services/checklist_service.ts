@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon'
 import db from '@adonisjs/lucid/services/db'
+import emitter from '@adonisjs/core/services/emitter'
 import type { TransactionClientContract } from '@adonisjs/lucid/types/database'
 import Checklist from '#modules/checklists/models/checklist'
 import ChecklistItem from '#modules/checklists/models/checklist_item'
@@ -270,7 +271,17 @@ export class ChecklistService {
       await inst.useTransaction(trx).save()
 
       await inst.load('respuestas')
-      return { instancia: inst, pendientes: pendientes.length }
+      return { instancia: inst, pendientes: pendientes.length, idEvento: p.idEvento }
+    }).then((r) => {
+      emitter.emit('checklist:cambio', {
+        idEvento: r.idEvento,
+        idParticipacion: r.instancia.idParticipacion,
+        idInstancia: r.instancia.id,
+        completado: r.instancia.completado,
+        aprobado: false,
+        pendientes: r.pendientes,
+      })
+      return { instancia: r.instancia, pendientes: r.pendientes }
     })
   }
 
@@ -319,7 +330,27 @@ export class ChecklistService {
         await p.useTransaction(trx).save()
       }
 
-      return { instancia: inst, tipo: plantilla.tipo, desbloquea_asignacion: plantilla.tipo === 'montaje' }
+      return {
+        instancia: inst,
+        tipo: plantilla.tipo,
+        desbloquea_asignacion: plantilla.tipo === 'montaje',
+        idEvento: p.idEvento,
+      }
+    }).then((r) => {
+      /**
+       * El capitán aprueba desde su panel y el mesero tiene que enterarse: es
+       * lo que le habilita la asignación de mesas y le dice que puede pasar a
+       * la siguiente fase sin refrescar.
+       */
+      emitter.emit('checklist:cambio', {
+        idEvento: r.idEvento,
+        idParticipacion: r.instancia.idParticipacion,
+        idInstancia: r.instancia.id,
+        completado: true,
+        aprobado: true,
+        pendientes: 0,
+      })
+      return { instancia: r.instancia, tipo: r.tipo, desbloquea_asignacion: r.desbloquea_asignacion }
     })
   }
 
