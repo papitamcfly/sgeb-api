@@ -87,6 +87,26 @@ export default await Env.create(new URL('../', import.meta.url), {
   FIREBASE_PROJECT_ID: Env.schema.string.optional(),
   FIREBASE_CLIENT_EMAIL: Env.schema.string.optional(),
   FIREBASE_PRIVATE_KEY: Env.schema.string.optional(),
+
+  /*
+  |----------------------------------------------------------------------------
+  | Almacenamiento de archivos (Supabase Storage, API compatible con S3)
+  |----------------------------------------------------------------------------
+  |
+  | `ALMACEN_MODO`: `local` (disco, solo desarrollo) o `s3`.
+  |
+  | El bucket debe ser PRIVADO. El archivo se sirve solo por URL firmada de 15
+  | minutos: una clave adivinable dejaría ver la comanda de cualquier evento.
+  |
+  | S3_ENDPOINT de Supabase:
+  |   https://<proyecto>.storage.supabase.co/storage/v1/s3
+  */
+  ALMACEN_MODO: Env.schema.enum(['local', 's3'] as const),
+  S3_ENDPOINT: Env.schema.string.optional(),
+  S3_REGION: Env.schema.string.optional(),
+  S3_BUCKET: Env.schema.string.optional(),
+  S3_ACCESS_KEY_ID: Env.schema.string.optional(),
+  S3_SECRET_ACCESS_KEY: Env.schema.string.optional(),
   /** Debe coincidir con el claim `iss`. Un token de otro emisor se rechaza. */
   SSO_ISSUER: Env.schema.string({ format: 'url' }),
   /** Claim `aud`. Un token emitido para otro destinatario no sirve aquí. */

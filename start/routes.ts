@@ -147,6 +147,12 @@ router
 
         router.put('/eventos/:id_evento/mesas/:id_mesa', '#modules/eventos/controllers/eventos_controller.actualizarMesa')
 
+        /** La comanda la sube y administra el capitán. */
+        router.post('/eventos/:id_evento/comanda', '#modules/eventos/controllers/comanda_controller.subir')
+        router.delete('/eventos/:id_evento/comanda', '#modules/eventos/controllers/comanda_controller.retirar')
+        router.get('/eventos/:id_evento/comanda/historial', '#modules/eventos/controllers/comanda_controller.historial')
+        router.patch('/eventos/:id_evento/comanda/:id_comanda/restaurar', '#modules/eventos/controllers/comanda_controller.restaurar')
+
         // ── Dashboard del capitán ─────────────────────────────────────
         router.get('/dashboard/capitan', '#modules/dashboard/controllers/dashboard_controller.capitan')
 
@@ -201,6 +207,10 @@ router
         router.get('/bebidas/:id_bebida', '#modules/menu/controllers/menu_controller.mostrarBebida')
         router.get('/bebidas/:id_bebida/receta', '#modules/menu/controllers/menu_controller.mostrarReceta')
         router.get('/envases/:id_envase', '#modules/menu/controllers/menu_controller.mostrarEnvase')
+
+        /** El mesero la consulta desde el salón; el servicio verifica su participación. */
+        router.get('/eventos/:id_evento/comanda', '#modules/eventos/controllers/comanda_controller.mostrar')
+        router.get('/eventos/:id_evento/comanda/archivo', '#modules/eventos/controllers/comanda_controller.descargar')
 
         router.get('/eventos/:id_evento/mesas', '#modules/eventos/controllers/eventos_controller.listarMesas')
         router.get('/eventos/:id_evento/mesas/:id_mesa', '#modules/eventos/controllers/eventos_controller.mostrarMesa')

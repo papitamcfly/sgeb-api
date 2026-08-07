@@ -927,6 +927,51 @@ Un token que FCM reporta como muerto se da de baja solo. Si no, la tabla acumula
 
 ---
 
+### Comanda del evento
+
+El documento que dice que se sirve y cuando. Lo sube el capitan y lo consultan los meseros desde el salon.
+
+**Nunca se sirve por URL publica.** El acceso pasa siempre por el backend, que verifica participacion en ese evento. Con un enlace publico, cualquiera que lo consiguiera veria la operacion completa de un evento ajeno — y los enlaces se reenvian por WhatsApp sin pensarlo.
+
+| | |
+|---|---|
+| Formatos | PDF, JPEG, PNG, HEIC, WebP |
+| Maximo | 10 MB |
+| Quien la ve | Capitan del evento, admin, meseros con participacion. **El comensal no** |
+| Reemplazable | Si, conservando la anterior |
+
+#### Por que se aceptan imagenes
+
+Muchos capitanes reciben la comanda por WhatsApp como foto. Exigir PDF los obligaria a convertirla en el telefono, que es justo lo que no van a hacer a las siete de la tarde.
+
+#### La clave lleva UUID, no el nombre del archivo
+
+`comandas/{id_evento}/{uuid}.pdf`. Dos razones: el nombre que pone el capitan puede repetirse entre eventos, y uno adivinable en el bucket haria que la privacidad dependiera solo del ACL.
+
+**La clave no se serializa nunca.** Exponerla permitiria construir peticiones directas al almacenamiento saltandose la verificacion de permisos.
+
+#### Reemplazar no borra
+
+La version anterior queda inactiva pero el objeto se conserva. Si el capitan sube la equivocada a media fiesta, se puede volver con `PATCH /comanda/{id}/restaurar`, que **no re-sube nada**: el archivo sigue ahi y solo cambia cual esta vigente.
+
+Costaria mas un evento servido con la comanda incorrecta que los kilobytes de las versiones viejas.
+
+**Retirar no reactiva la anterior**: eso seria adivinar la intencion del capitan. El evento queda sin comanda hasta que suba otra o restaure una a proposito.
+
+#### URL firmada de 15 minutos
+
+Suficiente para abrir el documento y leerlo, y corto para que un enlace reenviado deje de servir enseguida. Se firma en cada peticion en vez de guardarse: una URL firmada caduca, asi que persistirla seria persistir algo que deja de servir.
+
+Hay ademas `GET /comanda/archivo`, que sirve el binario desde el backend, para clientes que no puedan seguir un enlace externo.
+
+#### `forcePathStyle` es obligatorio con Supabase
+
+Supabase no soporta el estilo de host virtual (`bucket.dominio`) que el SDK de S3 usa por defecto contra AWS. Sin `forcePathStyle: true`, cada peticion falla con un error de DNS que no menciona la causa.
+
+Se usa el SDK de S3 y no el cliente propio de Supabase a proposito: si algun dia se cambia a Spaces, R2 o al S3 real, basta con reemplazar endpoint y credenciales.
+
+---
+
 ## Lo que falta
 
 1. **Correo** para códigos 2FA, invitaciones y recuperación. Hoy el código se escribe en el log fuera de producción (`[DEV] Codigo de verificacion: 123456`), que es lo que permite desarrollar sin servidor de correo.

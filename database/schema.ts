@@ -193,6 +193,29 @@ export class CodigoVerificacionSchema extends BaseModel {
   declare usado: boolean
 }
 
+export class ComandaEventoSchema extends BaseModel {
+  static $columns = ['activo', 'claveObjeto', 'creadoEn', 'idComanda', 'idEvento', 'idSubidoPor', 'nombreOriginal', 'tamanoBytes', 'tipoMime'] as const
+  $columns = ComandaEventoSchema.$columns
+  @column()
+  declare activo: boolean
+  @column()
+  declare claveObjeto: string
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column({ isPrimary: true })
+  declare idComanda: number
+  @column()
+  declare idEvento: number
+  @column()
+  declare idSubidoPor: number
+  @column()
+  declare nombreOriginal: string
+  @column()
+  declare tamanoBytes: number
+  @column()
+  declare tipoMime: string
+}
+
 export class ConfigDispensadoSchema extends BaseModel {
   static $columns = ['activo', 'caudalMlSeg', 'idConfig', 'idCubaitor', 'idEvento', 'idInsumo', 'pinGpio', 'ultimaCalibracion', 'volumenCargadoMl', 'volumenDisponibleMl'] as const
   $columns = ConfigDispensadoSchema.$columns
