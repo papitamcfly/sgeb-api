@@ -7,6 +7,8 @@ import {
   configPinValidator,
   recargaValidator,
   heartbeatValidator,
+  cubaitorParcialValidator,
+  configParcialValidator,
 } from '#modules/cubaitor/validators/cubaitor_validator'
 
 @inject()
@@ -15,6 +17,36 @@ export default class CubaitorController {
 
   async listar(ctx: HttpContext) {
     return responder.lista(ctx, await this.cubaitor.listar())
+  }
+
+  async mostrar(ctx: HttpContext) {
+    return responder.ok(ctx, await this.cubaitor.obtener(ctx.request.param('id_cubaitor')))
+  }
+
+  /** La MAC no se edita: es la identidad física del dispositivo. */
+  async actualizar(ctx: HttpContext) {
+    const datos = await cubaitorParcialValidator.validate(ctx.request.body())
+    return responder.ok(ctx, await this.cubaitor.actualizar(ctx.request.param('id_cubaitor'), datos))
+  }
+
+  async desactivar(ctx: HttpContext) {
+    await this.cubaitor.desactivar(ctx.request.param('id_cubaitor'))
+    return responder.ok(ctx, null, `CUBAITOR id=${ctx.request.param('id_cubaitor')} estado=inactivo.`)
+  }
+
+  /** Alertas derivadas del estado actual; no hay tabla de alertas. */
+  async alertas(ctx: HttpContext) {
+    return responder.ok(ctx, await this.cubaitor.alertas(ctx.request.param('id_evento')))
+  }
+
+  async actualizarConfig(ctx: HttpContext) {
+    const datos = await configParcialValidator.validate(ctx.request.body())
+    return responder.ok(ctx, await this.cubaitor.actualizarConfig(ctx.request.param('id_config'), datos))
+  }
+
+  async desactivarConfig(ctx: HttpContext) {
+    await this.cubaitor.desactivarConfig(ctx.request.param('id_config'))
+    return responder.ok(ctx, null, `CONFIG_DISPENSADO id=${ctx.request.param('id_config')} activo=0.`)
   }
 
   async registrar(ctx: HttpContext) {

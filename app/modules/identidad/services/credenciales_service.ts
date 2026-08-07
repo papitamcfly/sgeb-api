@@ -1,8 +1,8 @@
 import { DateTime } from 'luxon'
 import { randomInt, createHash, randomBytes } from 'node:crypto'
-import app from '@adonisjs/core/services/app'
 import hash from '@adonisjs/core/services/hash'
-import logger from '@adonisjs/core/services/logger'
+import { inject } from '@adonisjs/core'
+import { CorreoService } from '#shared/services/correo_service'
 import db from '@adonisjs/lucid/services/db'
 import Usuario from '#modules/identidad/models/usuario'
 import IntentoLogin, { type MotivoFallo } from '#modules/identidad/models/intento_login'
@@ -33,7 +33,10 @@ export type ResultadoLogin =
   | { estado: 'autenticado'; usuario: Usuario; metodoLogin: 'password' | 'password_2fa' }
   | { estado: 'verificacion_requerida'; usuario: Usuario; ticket2fa: string }
 
+@inject()
 export class CredencialesService {
+  constructor(private correo: CorreoService) {}
+
   /**
    * Valida correo y contraseña.
    *
@@ -186,19 +189,20 @@ export class CredencialesService {
     })
 
     /**
-     * Envio por correo: pendiente. Si el proveedor de correo falla, responde
-     * SSO-5003 y el codigo queda inservible: no se debe reutilizar uno que el
-     * usuario nunca recibio.
+     * El envío ocurre FUERA de la transacción que guardó el código, a propósito.
      *
-     * Fuera de produccion se escribe en el log. Sin servidor de correo local no
-     * habria forma de completar el flujo al desarrollar, y la alternativa
-     * (desactivar el segundo factor en desarrollo) haria que se probara un
-     * flujo distinto del que corre en produccion, que es justo donde aparecen
-     * los errores de cableado.
+     * Si fallara dentro, el rollback borraría el código y el usuario recibiría
+     * un error genérico. Así el código queda guardado y el fallo se reporta como
+     * SSO-5003, que le dice al usuario que reintente el envío en vez de volver a
+     * capturar sus credenciales.
+     *
+     * En modo `log` el código se escribe en el registro. Sin eso no habría forma
+     * de completar el flujo al desarrollar, y la alternativa —desactivar el
+     * segundo factor en desarrollo— haría que se probara un flujo distinto del
+     * que corre en producción, que es justo donde aparecen los errores de
+     * cableado.
      */
-    if (!app.inProduction) {
-      logger.info({ correo: usuario.correo, proposito }, `[DEV] Codigo de verificacion: ${codigo}`)
-    }
+    await this.correo.codigoVerificacion(usuario.correo, codigo)
 
     return codigo
   }

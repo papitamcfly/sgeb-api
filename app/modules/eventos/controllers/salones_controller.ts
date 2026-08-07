@@ -38,6 +38,23 @@ export default class SalonesController {
     return responder.ok(ctx, await this.servicio.actualizar(ctx.request.param('id_salon'), datos))
   }
 
+  /**
+   * Fechas ocupadas del salón en un rango.
+   *
+   * Solo cuentan `publicado` y `en_curso`: un borrador es un plan, no un
+   * compromiso, y bloquear la fecha por él impediría agendar algo real.
+   */
+  async disponibilidad(ctx: HttpContext) {
+    const { EventoService } = await import('#modules/eventos/services/evento_service')
+    const eventos = await ctx.containerResolver.make(EventoService)
+    const r = await eventos.disponibilidadSalon(
+      ctx.request.param('id_salon'),
+      ctx.request.input('fecha_desde'),
+      ctx.request.input('fecha_hasta')
+    )
+    return responder.ok(ctx, r)
+  }
+
   async desactivar(ctx: HttpContext) {
     await this.servicio.desactivar(ctx.request.param('id_salon'))
     return responder.ok(ctx, null, `SALON id=${ctx.request.param('id_salon')} activo=0.`)

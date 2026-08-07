@@ -49,6 +49,12 @@ export class ParticipacionService {
     return q.orderBy('id_participacion')
   }
 
+  async obtener(id: number): Promise<ParticipacionEvento> {
+    const p = await ParticipacionEvento.find(id)
+    if (!p) throw errores.noEncontrado('PARTICIPACION_EVENTO', id)
+    return p
+  }
+
   /**
    * El mesero aparta su lugar (RF-8).
    *

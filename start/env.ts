@@ -44,6 +44,49 @@ export default await Env.create(new URL('../', import.meta.url), {
    * lograra leerlo.
    */
   SOCKET_CORS_ORIGIN: Env.schema.string(),
+
+  /*
+  |----------------------------------------------------------------------------
+  | Correo saliente (Mailtrap por SMTP)
+  |----------------------------------------------------------------------------
+  |
+  | `CORREO_MODO` decide el transporte:
+  |   log      escribe el mensaje en el log. Desarrollo y pruebas
+  |   mailtrap envía por SMTP
+  |
+  | La validación es la misma en ambos modos: el servicio arma el mensaje igual
+  | y solo cambia a dónde va. Así el flujo que se prueba en desarrollo es el
+  | mismo que corre en producción.
+  */
+  CORREO_MODO: Env.schema.enum(['log', 'mailtrap'] as const),
+  MAIL_HOST: Env.schema.string.optional(),
+  MAIL_PORT: Env.schema.string.optional(),
+  MAIL_USERNAME: Env.schema.string.optional(),
+  MAIL_PASSWORD: Env.schema.string.optional(),
+  MAIL_FROM_ADDRESS: Env.schema.string.optional(),
+  MAIL_FROM_NAME: Env.schema.string.optional(),
+
+  /** Base de los enlaces que viajan por correo (invitación, recuperación). */
+  APP_URL_PROVEEDOR: Env.schema.string.optional(),
+
+  /*
+  |----------------------------------------------------------------------------
+  | Notificaciones push (Firebase Cloud Messaging)
+  |----------------------------------------------------------------------------
+  |
+  | `PUSH_MODO`: `log` o `firebase`.
+  |
+  | Las tres variables de Firebase son los campos del archivo de cuenta de
+  | servicio. Se pasan sueltas y no como JSON completo para no tener que
+  | versionar ni montar un archivo con credenciales en el servidor.
+  |
+  | FIREBASE_PRIVATE_KEY lleva saltos de línea escapados (\n): el servicio los
+  | restituye al leerla, porque una variable de entorno no admite saltos reales.
+  */
+  PUSH_MODO: Env.schema.enum(['log', 'firebase'] as const),
+  FIREBASE_PROJECT_ID: Env.schema.string.optional(),
+  FIREBASE_CLIENT_EMAIL: Env.schema.string.optional(),
+  FIREBASE_PRIVATE_KEY: Env.schema.string.optional(),
   /** Debe coincidir con el claim `iss`. Un token de otro emisor se rechaza. */
   SSO_ISSUER: Env.schema.string({ format: 'url' }),
   /** Claim `aud`. Un token emitido para otro destinatario no sirve aquí. */

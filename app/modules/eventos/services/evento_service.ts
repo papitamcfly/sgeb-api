@@ -305,6 +305,85 @@ export class EventoService {
     })
   }
 
+  async listarMesas(idEvento: number) {
+    await this.obtener(idEvento)
+    return Mesa.query().where('id_evento', idEvento).orderBy('etiqueta')
+  }
+
+  async obtenerMesa(idEvento: number, idMesa: number): Promise<Mesa> {
+    const m = await Mesa.query().where('id_mesa', idMesa).where('id_evento', idEvento).first()
+    if (!m) throw errores.noEncontrado('MESA', idMesa)
+    return m
+  }
+
+  /**
+   * Edita la mesa. El `codigo_qr` NO se toca aquí: para eso está regenerar, que
+   * es una operación con consecuencia —invalida el impreso— y merece una ruta
+   * propia en vez de ocurrir de rebote al corregir una etiqueta.
+   */
+  async actualizarMesa(
+    idEvento: number,
+    idMesa: number,
+    datos: Partial<{ etiqueta: string; nfcUid: string | null }>
+  ): Promise<Mesa> {
+    const m = await this.obtenerMesa(idEvento, idMesa)
+
+    if (datos.etiqueta) m.etiqueta = datos.etiqueta.trim()
+    if (datos.nfcUid !== undefined) m.nfcUid = datos.nfcUid
+
+    try {
+      await m.save()
+    } catch (error) {
+      const e = error as { code?: string }
+      if (e.code === '23505') {
+        throw new SgebError('SGEB-2013', {
+          tecnico: `etiqueta='${datos.etiqueta}' ya existe en el evento ${idEvento}.`,
+          causa: error,
+        })
+      }
+      throw error
+    }
+    return m
+  }
+
+  /**
+   * Fechas ocupadas de un salón.
+   *
+   * Solo cuentan los eventos `publicado` y `en_curso`: un borrador todavía es un
+   * plan, no un compromiso, y bloquear la fecha por un borrador impediría que
+   * otro capitán agendara algo real.
+   */
+  async disponibilidadSalon(idSalon: number, desde: string, hasta: string) {
+    const salon = await Salon.find(idSalon)
+    if (!salon) throw errores.noEncontrado('SALON', idSalon)
+
+    if (desde > hasta) {
+      throw new SgebError('SGEB-2009', {
+        tecnico: `fecha_desde=${desde} > fecha_hasta=${hasta}.`,
+      })
+    }
+
+    const ocupados = await Evento.query()
+      .where('id_salon', idSalon)
+      .whereIn('estado', ['publicado', 'en_curso'])
+      .whereBetween('fecha', [desde, hasta])
+      .orderBy('fecha')
+
+    return {
+      id_salon: salon.id,
+      nombre: salon.nombre,
+      activo: salon.activo,
+      desde,
+      hasta,
+      fechas_ocupadas: ocupados.map((e) => ({
+        fecha: e.fecha.toISODate(),
+        id_evento: e.id,
+        titulo: e.titulo,
+        estado: e.estado,
+      })),
+    }
+  }
+
   /**
    * Regenera el QR de una mesa (RF-22).
    *

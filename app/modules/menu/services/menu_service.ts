@@ -23,6 +23,30 @@ export class MenuService {
     return q
   }
 
+  async obtenerInsumo(id: number): Promise<Insumo> {
+    const i = await Insumo.find(id)
+    if (!i) throw errores.noEncontrado('INSUMO', id)
+    return i
+  }
+
+  /**
+   * Edita el catálogo. NO toca `estado`: ese es operativo y se cambia por su
+   * propia ruta, porque marcar 'agotado' tiene efectos —pausar órdenes— que no
+   * deben ocurrir de rebote al corregir un nombre mal escrito.
+   */
+  async actualizarInsumo(
+    id: number,
+    datos: Partial<{ nombre: string; tipo: 'alcohol' | 'refresco' | 'jugo' | 'agua' | 'otro'; unidad: string; costo: number }>
+  ): Promise<Insumo> {
+    const i = await this.obtenerInsumo(id)
+    if (datos.nombre) i.nombre = datos.nombre.trim()
+    if (datos.tipo) i.tipo = datos.tipo
+    if (datos.unidad) i.unidad = datos.unidad.trim()
+    if (datos.costo !== undefined) i.costo = datos.costo
+    await i.save()
+    return i
+  }
+
   async crearInsumo(datos: {
     nombre: string
     tipo: 'alcohol' | 'refresco' | 'jugo' | 'agua' | 'otro'
@@ -127,6 +151,33 @@ export class MenuService {
     return q
   }
 
+  async obtenerBebida(id: number): Promise<Bebida> {
+    const b = await Bebida.query()
+      .where('id_bebida', id)
+      .preload('receta', (r) => r.orderBy('orden_servido'))
+      .first()
+    if (!b) throw errores.noEncontrado('BEBIDA', id)
+    return b
+  }
+
+  /** Solo el catálogo. La receta se reemplaza completa por su propia ruta. */
+  async actualizarBebida(
+    id: number,
+    datos: Partial<{ nombre: string; descripcion: string | null; alcoholica: boolean }>
+  ): Promise<Bebida> {
+    const b = await this.obtenerBebida(id)
+    if (datos.nombre) b.nombre = datos.nombre.trim()
+    if (datos.descripcion !== undefined) b.descripcion = datos.descripcion?.trim() || null
+    if (datos.alcoholica !== undefined) b.alcoholica = datos.alcoholica
+    await b.save()
+    return b
+  }
+
+  async obtenerReceta(idBebida: number) {
+    const b = await this.obtenerBebida(idBebida)
+    return { id_bebida: b.id, nombre: b.nombre, receta: b.receta }
+  }
+
   async crearBebida(datos: { nombre: string; descripcion?: string | null; alcoholica: boolean }) {
     return Bebida.create({
       nombre: datos.nombre.trim(),
@@ -223,6 +274,28 @@ export class MenuService {
     const q = Envase.query().orderBy('volumen_ml')
     if (soloActivos) q.where('activo', true)
     return q
+  }
+
+  async obtenerEnvase(id: number): Promise<Envase> {
+    const e = await Envase.find(id)
+    if (!e) throw errores.noEncontrado('ENVASE', id)
+    return e
+  }
+
+  /**
+   * Cambiar el volumen NO recalcula órdenes ya levantadas: cada ORDEN_DETALLE
+   * congeló su `volumen_total_ml`. Alterarlo retroactivamente cambiaría el
+   * consumo histórico de insumos de eventos ya cerrados.
+   */
+  async actualizarEnvase(
+    id: number,
+    datos: Partial<{ nombre: string; volumenMl: number }>
+  ): Promise<Envase> {
+    const e = await this.obtenerEnvase(id)
+    if (datos.nombre) e.nombre = datos.nombre.trim()
+    if (datos.volumenMl !== undefined) e.volumenMl = datos.volumenMl
+    await e.save()
+    return e
   }
 
   async crearEnvase(datos: { nombre: string; volumenMl: number }) {

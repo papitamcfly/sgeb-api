@@ -346,6 +346,25 @@ export class DispositivoConfiableSchema extends BaseModel {
   declare userAgent: string | null
 }
 
+export class DispositivoPushSchema extends BaseModel {
+  static $columns = ['activo', 'actualizadoEn', 'creadoEn', 'idDispositivoPush', 'idUsuario', 'plataforma', 'token'] as const
+  $columns = DispositivoPushSchema.$columns
+  @column()
+  declare activo: boolean
+  @column.dateTime()
+  declare actualizadoEn: DateTime
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column({ isPrimary: true })
+  declare idDispositivoPush: number
+  @column()
+  declare idUsuario: number
+  @column()
+  declare plataforma: any
+  @column()
+  declare token: string
+}
+
 export class EnvaseSchema extends BaseModel {
   static $columns = ['activo', 'idEnvase', 'nombre', 'volumenMl'] as const
   $columns = EnvaseSchema.$columns
@@ -555,6 +574,27 @@ export class MesaSchema extends BaseModel {
   declare idMesa: number
   @column()
   declare nfcUid: string | null
+}
+
+export class MovimientoBitacoraSchema extends BaseModel {
+  static $columns = ['accion', 'detalle', 'idBitacora', 'idEntidad', 'ip', 'timestamp', 'tipoEntidad', 'uuidUsuarioResponsable'] as const
+  $columns = MovimientoBitacoraSchema.$columns
+  @column()
+  declare accion: any
+  @column()
+  declare detalle: string | null
+  @column({ isPrimary: true })
+  declare idBitacora: number
+  @column()
+  declare idEntidad: number | null
+  @column()
+  declare ip: string | null
+  @column.dateTime()
+  declare timestamp: DateTime
+  @column()
+  declare tipoEntidad: string
+  @column()
+  declare uuidUsuarioResponsable: string | null
 }
 
 export class NotificacionSchema extends BaseModel {

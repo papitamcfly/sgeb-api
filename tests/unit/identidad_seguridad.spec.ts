@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { jwtVerify, createLocalJWKSet } from 'jose'
 import db from '@adonisjs/lucid/services/db'
 import hash from '@adonisjs/core/services/hash'
+import app from '@adonisjs/core/services/app'
 import testUtils from '@adonisjs/core/services/test_utils'
 
 import { LlaveFirmaService } from '#modules/identidad/services/llave_firma_service'
@@ -479,7 +480,7 @@ test.group('Credenciales y bloqueo', (group) => {
 
   test('credenciales correctas piden segundo factor', async ({ assert }) => {
     await sembrarUsuario()
-    const r = await new CredencialesService().autenticar({
+    const r = await (await app.container.make(CredencialesService)).autenticar({
       correo: 'cap@x.mx',
       password: PASSWORD,
       cliente: 'web',
@@ -489,7 +490,7 @@ test.group('Credenciales y bloqueo', (group) => {
 
   test('contraseña incorrecta y correo inexistente dan el MISMO código', async ({ assert }) => {
     await sembrarUsuario()
-    const s = new CredencialesService()
+    const s = await app.container.make(CredencialesService)
 
     /**
      * Distinguirlos convertiría el login en un enumerador de cuentas: probando
@@ -507,13 +508,10 @@ test.group('Credenciales y bloqueo', (group) => {
 
   test('una cuenta desactivada no entra aunque la contraseña sea correcta', async ({ assert }) => {
     await sembrarUsuario(false)
+    const s = await app.container.make(CredencialesService)
     assert.equal(
       await codigoDeFallo(() =>
-        new CredencialesService().autenticar({
-          correo: 'cap@x.mx',
-          password: PASSWORD,
-          cliente: 'web',
-        })
+        s.autenticar({ correo: 'cap@x.mx', password: PASSWORD, cliente: 'web' })
       ),
       'SSO-1005'
     )
@@ -521,7 +519,7 @@ test.group('Credenciales y bloqueo', (group) => {
 
   test('cinco fallos bloquean la cuenta temporalmente', async ({ assert }) => {
     await sembrarUsuario()
-    const s = new CredencialesService()
+    const s = await app.container.make(CredencialesService)
 
     for (let i = 0; i < 5; i++) {
       await codigoDeFallo(() =>
@@ -542,7 +540,7 @@ test.group('Credenciales y bloqueo', (group) => {
     assert,
   }) => {
     const usuario = await sembrarUsuario()
-    const s = new CredencialesService()
+    const s = await app.container.make(CredencialesService)
     const codigo = await s.emitirCodigo(usuario, 'login')
 
     assert.match(codigo, /^\d{6}$/)
@@ -564,7 +562,7 @@ test.group('Credenciales y bloqueo', (group) => {
 
   test('un código incorrecto cuenta el intento; a los cinco se invalida', async ({ assert }) => {
     const usuario = await sembrarUsuario()
-    const s = new CredencialesService()
+    const s = await app.container.make(CredencialesService)
     await s.emitirCodigo(usuario, 'login')
 
     for (let i = 0; i < 5; i++) {
@@ -586,7 +584,7 @@ test.group('Credenciales y bloqueo', (group) => {
 
   test('emitir un código nuevo invalida el anterior', async ({ assert }) => {
     const usuario = await sembrarUsuario()
-    const s = new CredencialesService()
+    const s = await app.container.make(CredencialesService)
     const viejo = await s.emitirCodigo(usuario, 'login')
     await s.emitirCodigo(usuario, 'login')
 
@@ -601,7 +599,7 @@ test.group('Credenciales y bloqueo', (group) => {
 
   test('el reenvío exige esperar 60 segundos', async ({ assert }) => {
     const usuario = await sembrarUsuario()
-    const s = new CredencialesService()
+    const s = await app.container.make(CredencialesService)
     await s.emitirCodigo(usuario, 'login')
 
     assert.equal(await codigoDeFallo(() => s.reenviarCodigo(usuario.id, 'login')), 'SSO-1011')
@@ -609,7 +607,7 @@ test.group('Credenciales y bloqueo', (group) => {
 
   test('un dispositivo confiable vigente omite el segundo factor', async ({ assert }) => {
     const usuario = await sembrarUsuario()
-    const s = new CredencialesService()
+    const s = await app.container.make(CredencialesService)
     const token = await s.confiarDispositivo({ idUsuario: usuario.id, plataforma: 'ios' })
 
     const r = await s.autenticar({
@@ -623,7 +621,7 @@ test.group('Credenciales y bloqueo', (group) => {
 
   test('un dispositivo caducado NO es error: solo pierde el atajo', async ({ assert }) => {
     const usuario = await sembrarUsuario()
-    const s = new CredencialesService()
+    const s = await app.container.make(CredencialesService)
     const token = await s.confiarDispositivo({ idUsuario: usuario.id, plataforma: 'ios' })
     await db
       .from('auth.dispositivo_confiable')
@@ -640,7 +638,7 @@ test.group('Credenciales y bloqueo', (group) => {
 
   test('el token de dispositivo se guarda hasheado', async ({ assert }) => {
     const usuario = await sembrarUsuario()
-    const token = await new CredencialesService().confiarDispositivo({
+    const token = await (await app.container.make(CredencialesService)).confiarDispositivo({
       idUsuario: usuario.id,
       plataforma: 'web',
     })

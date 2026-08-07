@@ -1,6 +1,7 @@
 import { test } from '@japa/runner'
 import { createHash, randomBytes } from 'node:crypto'
 import db from '@adonisjs/lucid/services/db'
+import app from '@adonisjs/core/services/app'
 import testUtils from '@adonisjs/core/services/test_utils'
 import { LlaveFirmaService } from '#modules/identidad/services/llave_firma_service'
 import { InvitacionService } from '#modules/identidad/services/invitacion_service'
@@ -61,7 +62,7 @@ test.group('Alta del mesero por invitación', (group) => {
 
   test('el capitán invita y el mesero completa su registro', async ({ assert }) => {
     const idCap = await capitan()
-    const inv = new InvitacionService()
+    const inv = await app.container.make(InvitacionService)
 
     const { token, deeplink } = await inv.invitar({
       idEmisor: idCap,
@@ -103,7 +104,7 @@ test.group('Alta del mesero por invitación', (group) => {
 
   test('el deeplink no se puede usar dos veces', async ({ assert }) => {
     const idCap = await capitan()
-    const inv = new InvitacionService()
+    const inv = await app.container.make(InvitacionService)
     const { token } = await inv.invitar({
       idEmisor: idCap,
       idRolDestino: 3,
@@ -132,7 +133,7 @@ test.group('Alta del mesero por invitación', (group) => {
 
   test('rechaza una CLABE con dígito de control incorrecto', async ({ assert }) => {
     const idCap = await capitan()
-    const inv = new InvitacionService()
+    const inv = await app.container.make(InvitacionService)
     const { token } = await inv.invitar({
       idEmisor: idCap,
       idRolDestino: 3,
@@ -163,7 +164,7 @@ test.group('Alta del mesero por invitación', (group) => {
 
   test('exige aceptar el aviso de privacidad y una contraseña con política', async ({ assert }) => {
     const idCap = await capitan()
-    const inv = new InvitacionService()
+    const inv = await app.container.make(InvitacionService)
     const base = {
       password: PASSWORD,
       password2: PASSWORD,
@@ -197,7 +198,7 @@ test.group('Flujo HTTP completo con PKCE', (group) => {
 
   async function meseroRegistrado(): Promise<Usuario> {
     const idCap = await capitan()
-    const inv = new InvitacionService()
+    const inv = await app.container.make(InvitacionService)
     const { token } = await inv.invitar({
       idEmisor: idCap,
       idRolDestino: 3,
@@ -277,7 +278,7 @@ test.group('Flujo HTTP completo con PKCE', (group) => {
     assert.isFalse(fila.usado)
 
     /** Se prueba con un código conocido, emitiéndolo desde el servicio. */
-    const codigo = await new CredencialesService().emitirCodigo(usuario, 'login')
+    const codigo = await (await app.container.make(CredencialesService)).emitirCodigo(usuario, 'login')
 
     const verif = await client
       .post('/interno/verificacion')
@@ -327,7 +328,7 @@ test.group('Flujo HTTP completo con PKCE', (group) => {
     const ticket = new URL(auth.headers().location!, 'http://x').searchParams.get('ticket')!
     await client.post('/interno/login').form({ ticket, correo: 'juan@x.mx', password: PASSWORD }).redirects(0)
 
-    const codigo = await new CredencialesService().emitirCodigo(usuario, 'login')
+    const codigo = await (await app.container.make(CredencialesService)).emitirCodigo(usuario, 'login')
     const verif = await client.post('/interno/verificacion').form({ ticket, codigo }).redirects(0)
     const code = new URL(verif.headers().location!).searchParams.get('code')!
 
@@ -403,7 +404,7 @@ test.group('Recuperación de contraseña', (group) => {
 
   async function mesero(): Promise<Usuario> {
     const idCap = await capitan()
-    const inv = new InvitacionService()
+    const inv = await app.container.make(InvitacionService)
     const { token } = await inv.invitar({
       idEmisor: idCap, idRolDestino: 3, nombre: 'Juan', apellidoPaterno: 'Perez', correo: 'juan@x.mx',
     })
@@ -415,7 +416,7 @@ test.group('Recuperación de contraseña', (group) => {
 
   test('un correo inexistente responde igual que uno real', async ({ client, assert }) => {
     await mesero()
-    const s = new RecuperacionService()
+    const s = await app.container.make(RecuperacionService)
 
     const real = await s.solicitar('juan@x.mx')
     const falso = await s.solicitar('nadie@x.mx')
@@ -442,7 +443,7 @@ test.group('Recuperación de contraseña', (group) => {
       revocado: false,
     })
 
-    const s = new RecuperacionService()
+    const s = await app.container.make(RecuperacionService)
     const token = (await s.solicitar('juan@x.mx'))!
     await s.confirmar({ token, password: 'NuevaClave9', password2: 'NuevaClave9' })
 
@@ -457,7 +458,7 @@ test.group('Recuperación de contraseña', (group) => {
 
   test('el enlace de recuperación es de un solo uso', async ({ assert }) => {
     await mesero()
-    const s = new RecuperacionService()
+    const s = await app.container.make(RecuperacionService)
     const token = (await s.solicitar('juan@x.mx'))!
     await s.confirmar({ token, password: 'NuevaClave9', password2: 'NuevaClave9' })
 
@@ -471,7 +472,7 @@ test.group('Recuperación de contraseña', (group) => {
 
   test('solicitar de nuevo invalida el enlace anterior', async ({ assert }) => {
     await mesero()
-    const s = new RecuperacionService()
+    const s = await app.container.make(RecuperacionService)
     const primero = (await s.solicitar('juan@x.mx'))!
 
     await db.from('auth.token_recuperacion').update({ creado_en: new Date(Date.now() - 600000).toISOString() })

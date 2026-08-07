@@ -9,6 +9,7 @@ import Notificacion from '#modules/notificaciones/models/notificacion'
 import ParticipacionEvento from '#modules/participaciones/models/participacion_evento'
 import { SgebError, errores } from '#shared/errors/sgeb_error'
 import { IdentidadService } from '#modules/identidad/identidad_service'
+import { PushService } from '#shared/services/push_service'
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -38,7 +39,10 @@ const MENSAJE: Record<string, string> = {
 
 @inject()
 export class CronogramaService {
-  constructor(private identidad: IdentidadService) {}
+  constructor(
+    private identidad: IdentidadService,
+    private push: PushService
+  ) {}
 
   async listar(idEvento: number) {
     return CronogramaEvento.query().where('id_evento', idEvento).orderBy('hora_objetivo')
@@ -228,19 +232,33 @@ export class CronogramaService {
         )
       }
 
-      return { hito, destinatarios: enPiso.length, mensaje }
+      return {
+        hito,
+        destinatarios: enPiso.length,
+        destinatarios_ids: enPiso.map((p) => p.id),
+        mensaje,
+      }
     })
 
     if (!resultado) return false
 
     /**
-     * El envío real de push aún no existe. Cuando exista, va aquí y NO dentro de
-     * la transacción: un fallo del proveedor no debe deshacer el registro de que
-     * el hito se disparó, o el siguiente ciclo volvería a notificar a quienes sí
-     * recibieron.
+     * El push va FUERA de la transacción, y `PushService.enviar` nunca lanza.
+     *
+     * Un fallo del proveedor no debe deshacer el registro de que el hito se
+     * disparó: el siguiente ciclo volvería a notificar a quienes sí recibieron.
+     * La notificación ya está en la base y llega además por el canal de tiempo
+     * real, así que el push es refuerzo, no el único camino.
      */
+    const envio = await this.push.aParticipaciones(
+      resultado.destinatarios_ids,
+      'Tiempo de servicio',
+      resultado.mensaje,
+      { tipo: 'TIEMPO_COMIDA', id_evento: String(resultado.hito.idEvento) }
+    )
+
     logger.info(
-      { idHito, destinatarios: resultado.destinatarios },
+      { idHito, destinatarios: resultado.destinatarios, push: envio },
       `Hito ${resultado.hito.tipoTiempo} disparado: ${resultado.mensaje}`
     )
 

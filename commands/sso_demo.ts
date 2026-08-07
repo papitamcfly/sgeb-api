@@ -29,7 +29,7 @@ export default class SsoDemo extends BaseCommand {
 
     let mesero = await Usuario.query().where('correo', 'juan@x.mx').preload('rol').first()
     if (!mesero) {
-      const inv = new InvitacionService()
+      const inv = await this.app.container.make(InvitacionService)
       const { token } = await inv.invitar({
         idEmisor: cap.id, idRolDestino: 3, nombre: 'Juan', apellidoPaterno: 'Perez', correo: 'juan@x.mx',
       })
@@ -41,7 +41,8 @@ export default class SsoDemo extends BaseCommand {
     }
 
     await db.from('auth.bloqueo_cuenta').update({ activo: false })
-    const codigo = await new CredencialesService().emitirCodigo(mesero, 'login')
+    const credenciales = await this.app.container.make(CredencialesService)
+    const codigo = await credenciales.emitirCodigo(mesero, 'login')
     this.logger.info(`mesero: juan@x.mx / Mesero2026`)
     this.logger.success(`CODIGO=${codigo}`)
   }

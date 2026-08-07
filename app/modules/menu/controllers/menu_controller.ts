@@ -8,6 +8,9 @@ import {
   bebidaValidator,
   recetaValidator,
   envaseValidator,
+  insumoParcialValidator,
+  bebidaParcialValidator,
+  envaseParcialValidator,
 } from '#modules/menu/validators/menu_validator'
 
 @inject()
@@ -25,6 +28,16 @@ export default class MenuController {
         estado: ctx.request.input('estado'),
       })
     )
+  }
+
+  async mostrarInsumo(ctx: HttpContext) {
+    return responder.ok(ctx, await this.menu.obtenerInsumo(ctx.request.param('id_insumo')))
+  }
+
+  /** No toca `estado`: ese es operativo y tiene su propia ruta. */
+  async actualizarInsumo(ctx: HttpContext) {
+    const datos = await insumoParcialValidator.validate(ctx.request.body())
+    return responder.ok(ctx, await this.menu.actualizarInsumo(ctx.request.param('id_insumo'), datos))
   }
 
   async crearInsumo(ctx: HttpContext) {
@@ -61,6 +74,20 @@ export default class MenuController {
     return responder.lista(ctx, await this.menu.listarBebidas(ctx.request.input('activo') !== 'false'))
   }
 
+  async mostrarBebida(ctx: HttpContext) {
+    return responder.ok(ctx, await this.menu.obtenerBebida(ctx.request.param('id_bebida')))
+  }
+
+  async mostrarReceta(ctx: HttpContext) {
+    return responder.ok(ctx, await this.menu.obtenerReceta(ctx.request.param('id_bebida')))
+  }
+
+  /** Solo el catálogo. La receta se reemplaza completa por su propia ruta. */
+  async actualizarBebida(ctx: HttpContext) {
+    const datos = await bebidaParcialValidator.validate(ctx.request.body())
+    return responder.ok(ctx, await this.menu.actualizarBebida(ctx.request.param('id_bebida'), datos))
+  }
+
   async crearBebida(ctx: HttpContext) {
     const datos = await bebidaValidator.validate(ctx.request.body())
     return responder.creado(ctx, await this.menu.crearBebida(datos))
@@ -82,6 +109,15 @@ export default class MenuController {
 
   async listarEnvases(ctx: HttpContext) {
     return responder.lista(ctx, await this.menu.listarEnvases(ctx.request.input('activo') !== 'false'))
+  }
+
+  async mostrarEnvase(ctx: HttpContext) {
+    return responder.ok(ctx, await this.menu.obtenerEnvase(ctx.request.param('id_envase')))
+  }
+
+  async actualizarEnvase(ctx: HttpContext) {
+    const datos = await envaseParcialValidator.validate(ctx.request.body())
+    return responder.ok(ctx, await this.menu.actualizarEnvase(ctx.request.param('id_envase'), datos))
   }
 
   async crearEnvase(ctx: HttpContext) {

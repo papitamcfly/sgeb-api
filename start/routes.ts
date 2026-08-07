@@ -123,6 +123,33 @@ router
         /** Las calificaciones solo las ve el capitán: son evaluación del personal. */
         router.get('/eventos/:id_evento/calificaciones', '#modules/comensal/controllers/comensal_controller.listarCalificaciones')
 
+
+        // ── Usuarios: administración de la plantilla ──────────────────
+        router.get('/roles', '#modules/identidad/controllers/usuarios_controller.listarRoles')
+        router.get('/usuarios', '#modules/identidad/controllers/usuarios_controller.listar')
+        router.post('/usuarios', '#modules/identidad/controllers/usuarios_controller.crear')
+        router.get('/usuarios/:uuid_usuario', '#modules/identidad/controllers/usuarios_controller.mostrar')
+        router.put('/usuarios/:uuid_usuario', '#modules/identidad/controllers/usuarios_controller.actualizar')
+        router.patch('/usuarios/:uuid_usuario', '#modules/identidad/controllers/usuarios_controller.cambiarEstado')
+        router.get('/usuarios/:uuid_usuario/datos-bancarios', '#modules/identidad/controllers/usuarios_controller.datosBancarios')
+        router.post('/usuarios/:uuid_usuario/datos-bancarios', '#modules/identidad/controllers/usuarios_controller.registrarDatosBancarios')
+        router.delete('/usuarios/:uuid_usuario/datos-bancarios', '#modules/identidad/controllers/usuarios_controller.desactivarDatosBancarios')
+
+        // ── Catálogo: edición individual ──────────────────────────────
+        router.put('/insumos/:id_insumo', '#modules/menu/controllers/menu_controller.actualizarInsumo')
+        router.put('/bebidas/:id_bebida', '#modules/menu/controllers/menu_controller.actualizarBebida')
+        router.put('/envases/:id_envase', '#modules/menu/controllers/menu_controller.actualizarEnvase')
+
+        router.put('/cubaitors/:id_cubaitor', '#modules/cubaitor/controllers/cubaitor_controller.actualizar')
+        router.delete('/cubaitors/:id_cubaitor', '#modules/cubaitor/controllers/cubaitor_controller.desactivar')
+        router.put('/eventos/:id_evento/config-dispensado/:id_config', '#modules/cubaitor/controllers/cubaitor_controller.actualizarConfig')
+        router.delete('/eventos/:id_evento/config-dispensado/:id_config', '#modules/cubaitor/controllers/cubaitor_controller.desactivarConfig')
+
+        router.put('/eventos/:id_evento/mesas/:id_mesa', '#modules/eventos/controllers/eventos_controller.actualizarMesa')
+
+        // ── Dashboard del capitán ─────────────────────────────────────
+        router.get('/dashboard/capitan', '#modules/dashboard/controllers/dashboard_controller.capitan')
+
         // ── Cronograma del evento ─────────────────────────────────────
         router.post('/eventos/:id_evento/cronograma', '#modules/eventos/controllers/cronograma_controller.crear')
         router.put('/eventos/:id_evento/cronograma/:id_hito', '#modules/eventos/controllers/cronograma_controller.actualizar')
@@ -160,6 +187,33 @@ router
          * El menú lo consultan los tres roles: el mesero lo necesita para
          * levantar la orden en la mesa.
          */
+
+        /** Perfil propio y datos bancarios propios. El sujeto sale del token. */
+        router.put('/usuarios/me', '#modules/identidad/controllers/usuarios_controller.actualizarMiPerfil')
+        router.get('/usuarios/me/datos-bancarios', '#modules/identidad/controllers/usuarios_controller.misDatosBancarios')
+        router.post('/usuarios/me/datos-bancarios', '#modules/identidad/controllers/usuarios_controller.registrarMisDatosBancarios')
+
+        /** La app registra su token de FCM al arrancar. Idempotente por token. */
+        router.post('/usuarios/me/dispositivos-push', '#modules/identidad/controllers/usuarios_controller.registrarDispositivoPush')
+
+        /** Consultas del catálogo: el mesero las necesita en la mesa. */
+        router.get('/insumos/:id_insumo', '#modules/menu/controllers/menu_controller.mostrarInsumo')
+        router.get('/bebidas/:id_bebida', '#modules/menu/controllers/menu_controller.mostrarBebida')
+        router.get('/bebidas/:id_bebida/receta', '#modules/menu/controllers/menu_controller.mostrarReceta')
+        router.get('/envases/:id_envase', '#modules/menu/controllers/menu_controller.mostrarEnvase')
+
+        router.get('/eventos/:id_evento/mesas', '#modules/eventos/controllers/eventos_controller.listarMesas')
+        router.get('/eventos/:id_evento/mesas/:id_mesa', '#modules/eventos/controllers/eventos_controller.mostrarMesa')
+        router.get('/participaciones/:id_participacion', '#modules/participaciones/controllers/participaciones_controller.mostrar')
+        router.get('/salones/:id_salon/disponibilidad', '#modules/eventos/controllers/salones_controller.disponibilidad')
+
+        router.get('/cubaitors/:id_cubaitor', '#modules/cubaitor/controllers/cubaitor_controller.mostrar')
+        router.get('/eventos/:id_evento/alertas', '#modules/cubaitor/controllers/cubaitor_controller.alertas')
+
+        /** Paneles: el del evento lo miran los tres roles desde el salón. */
+        router.get('/eventos/:id_evento/dashboard', '#modules/dashboard/controllers/dashboard_controller.evento')
+        router.get('/dashboard/meseros', '#modules/dashboard/controllers/dashboard_controller.meseros')
+
         /** El cronograma lo consulta el mesero: necesita saber cuándo toca cada tiempo. */
         router.get('/eventos/:id_evento/cronograma', '#modules/eventos/controllers/cronograma_controller.listar')
 
@@ -208,5 +262,13 @@ router
         router.post('/mesas/:id_mesa/ordenes', '#modules/ordenes/controllers/ordenes_controller.crear')
       })
       .use([middleware.auth(), middleware.sujeto(), middleware.rol(['mesero'])])
+
+    // ---------------------------------------------------------------- solo admin
+    // La bitácora expone quién hizo qué en todo el sistema.
+    router
+      .group(() => {
+        router.get('/admin/bitacora', '#modules/admin/controllers/bitacora_controller.listar')
+      })
+      .use([middleware.auth(), middleware.sujeto(), middleware.rol(['admin'])])
   })
   .prefix('/v1')

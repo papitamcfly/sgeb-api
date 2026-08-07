@@ -4,13 +4,19 @@ import hash from '@adonisjs/core/services/hash'
 import db from '@adonisjs/lucid/services/db'
 import TokenRecuperacion from '#modules/identidad/models/token_recuperacion'
 import Usuario from '#modules/identidad/models/usuario'
+import { inject } from '@adonisjs/core'
+import env from '#start/env'
 import { SsoError } from '#modules/identidad/errores_sso'
+import { CorreoService } from '#shared/services/correo_service'
 
 const VIGENCIA_MIN = 30
 const ESPERA_ENTRE_SOLICITUDES_MIN = 5
 const POLITICA_PASSWORD = /^(?=.*[A-ZÁÉÍÓÚÑ])(?=.*\d).{8,72}$/
 
+@inject()
 export class RecuperacionService {
+  constructor(private correo: CorreoService) {}
+
   private hash(v: string): string {
     return createHash('sha256').update(v).digest('hex')
   }
@@ -66,7 +72,12 @@ export class RecuperacionService {
       ipSolicitud: ip ?? null,
     })
 
-    // TODO: enviar por correo. Falla → SSO-5003.
+    const base = env.get('APP_URL_PROVEEDOR') ?? 'https://auth.sgeb.mediocres.mx'
+    await this.correo.recuperacion(
+      normalizado,
+      `${base}/interno/recuperar/nueva?token=${encodeURIComponent(token)}`
+    )
+
     return token
   }
 

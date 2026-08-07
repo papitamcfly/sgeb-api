@@ -4,7 +4,9 @@ import hash from '@adonisjs/core/services/hash'
 import db from '@adonisjs/lucid/services/db'
 import Invitacion from '#modules/identidad/models/invitacion'
 import Usuario from '#modules/identidad/models/usuario'
+import { inject } from '@adonisjs/core'
 import { SsoError } from '#modules/identidad/errores_sso'
+import { CorreoService } from '#shared/services/correo_service'
 
 const HORAS_VIGENCIA = 72
 
@@ -21,7 +23,10 @@ export interface DatosRegistro {
   aceptaPrivacidad: boolean
 }
 
+@inject()
 export class InvitacionService {
+  constructor(private correo: CorreoService) {}
+
   private hash(v: string): string {
     return createHash('sha256').update(v).digest('hex')
   }
@@ -80,7 +85,10 @@ export class InvitacionService {
       throw error
     }
 
-    return { token, deeplink: `mx.mediocres.sgeb://registro?token=${token}`, expiraEn }
+    const deeplink = `mx.mediocres.sgeb://registro?token=${token}`
+    await this.correo.invitacion(correo, datos.nombre, deeplink)
+
+    return { token, deeplink, expiraEn }
   }
 
   /** Lee la invitación para pintar la pantalla S4. */

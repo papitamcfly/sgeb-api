@@ -831,6 +831,102 @@ node ace cronograma:disparar    # tarea programada, cada minuto durante eventos
 
 ---
 
+### Usuarios, bitacora y dashboard
+
+Con estos tres cierra la cobertura del contrato: **108 de 108 operaciones**.
+
+#### El alta NO crea una contrasena utilizable
+
+`password_hash` queda con `!sin-credencial`, un marcador que ningun hash Bcrypt puede producir. Nadie entra hasta que el proveedor emita la invitacion y el usuario defina la suya en la pantalla S4.
+
+Se hace asi y no dejando el campo nulo porque la columna es NOT NULL en el Diccionario, y relajarla abriria la puerta a cuentas sin credencial que algun camino olvidado pudiera aceptar.
+
+**Ninguna operacion de este modulo toca contrasenas.** Si las aceptara, el panel volveria a ser intermediario de credenciales y el flujo de codigo de autorizacion perderia su proposito.
+
+#### Desactivar revoca en cascada
+
+Refresh tokens, sesiones SSO y dispositivos confiables. Los access tokens vigentes expiran solos en ≤ 15 min: esa ventana es una decision consciente que evita consultar la base de identidad en cada peticion del API.
+
+**Nadie se desactiva a si mismo** (SGEB-4022): un admin que lo hiciera se dejaria fuera y a nadie mas con permisos.
+
+#### La bitacora nunca lanza
+
+Un fallo al escribirla no debe tumbar la operacion que la genero. Si el capitan desactiva una cuenta y la bitacora falla, la cuenta debe quedar desactivada igual: perder el registro es malo, dejar la cuenta activa es peor. Hay una prueba que lo verifica forzando el fallo.
+
+Se registran los cambios auditables —altas, bajas, cambios de rol, ediciones de CLABE—, **no cada lectura**: una bitacora que registra todo se vuelve ilegible y nadie la consulta.
+
+La CLABE tambien se enmascara ahi: la bitacora se consulta desde el panel y no puede filtrar lo que el modelo oculta.
+
+#### El dashboard agrega, no calcula
+
+Se escribio al final a proposito: no tiene logica de negocio propia. Si aqui apareciera una regla —"un mesero cuenta como presente si…"— seria senal de que esa regla le falta a su modulo.
+
+**Cada seccion se calcula por separado y el fallo de una no tumba el resto.** Un panel donde una tarjeta dice "no disponible" es infinitamente mas util que una pantalla en blanco con un 500, sobre todo a media fiesta. Cuando alguna falla, la respuesta lleva SGEB-0004 (exito parcial).
+
+`?secciones=barra,servicio` pide solo lo necesario: el panel del capitan en el salon refresca esas dos cada pocos segundos y no tiene por que recalcular el cierre cada vez.
+
+**`siguiente_accion`** es el campo que de verdad usa el mesero: en el salon, con el telefono en una mano y una charola en la otra, nadie navega menus.
+
+#### Alertas sin tabla de alertas
+
+`GET /eventos/:id/alertas` las **deriva del estado actual**. Guardarlas obligaria a mantenerlas sincronizadas con la realidad —marcar como resuelta la de una botella que ya se recargo—, y una alerta obsoleta es peor que ninguna.
+
+Incluye un aviso temprano al 15 % de volumen: a esa altura queda tiempo de cambiar la botella sin pausar nada.
+
+---
+
+### Correo y push
+
+Mismo patron que `IdentidadService`: clase abstracta, dos implementaciones, y una variable de entorno decide cual se inyecta. **Activar el envio real es cambiar una variable, no tocar codigo.**
+
+| Variable | Valores | Transporte |
+|---|---|---|
+| `CORREO_MODO` | `log` \| `mailtrap` | Log del servidor \| SMTP de Mailtrap |
+| `PUSH_MODO` | `log` \| `firebase` | Log del servidor \| Firebase Cloud Messaging |
+
+#### Lo que NO cambia entre modos
+
+El mensaje. Ambas implementaciones reciben el mismo objeto y arman el mismo contenido; solo cambia a donde va. Asi el flujo que se prueba en desarrollo es exactamente el que corre en produccion, en vez de ser uno simplificado que esconde los errores hasta el despliegue.
+
+#### Mailtrap por SMTP, no por su API
+
+Mailtrap ofrece dos hosts con el mismo protocolo, asi que **el mismo codigo sirve para los dos entornos**:
+
+```
+sandbox.smtp.mailtrap.io   captura sin entregar. Desarrollo y staging
+live.smtp.mailtrap.io      entrega de verdad. Produccion
+```
+
+Se eligio SMTP sobre la API a proposito: si algun dia se cambia de proveedor basta con reemplazar host, puerto y credenciales. Con la API habria que reescribir el cliente.
+
+El puerto 2525 porque el 25 y el 587 suelen estar bloqueados por los proveedores de nube.
+
+#### El envio va FUERA de la transaccion
+
+Si fallara dentro, el rollback borraria el codigo 2FA y el usuario recibiria un error generico. Asi el codigo queda guardado y el fallo se reporta como SSO-5003, que le dice al usuario que reintente el envio en vez de volver a capturar sus credenciales. Hay una prueba que lo fija con un transporte que siempre falla.
+
+#### El push NUNCA lanza
+
+`PushService.enviar` devuelve un resultado en vez de lanzar. Si el hito del cronograma se dispara y Firebase esta caido, el hito **debe quedar marcado como disparado igual**: la notificacion ya esta en la base y el mesero la ve al abrir la app, ademas de que le llega por el canal de tiempo real.
+
+Si lanzara, el rollback desharia la marca y el siguiente ciclo volveria a notificar a todos los que si recibieron. **Peor que no avisar es avisar de mas.**
+
+#### La llave privada de Firebase
+
+Una variable de entorno no admite saltos de linea reales, asi que `FIREBASE_PRIVATE_KEY` viaja con `\n` escapados y el servicio los restituye al leerla. Sin eso el SDK falla con un error de PEM invalido que no dice nada sobre la causa.
+
+Se pasan los tres campos sueltos —proyecto, correo, llave— y no el JSON completo de la cuenta de servicio, para no tener que versionar ni montar un archivo con credenciales en el servidor.
+
+#### Tokens de dispositivo
+
+`POST /usuarios/me/dispositivos-push` es **idempotente por token**: la app lo reenvia en cada arranque porque el sistema puede rotarlo, y acumular registros mandaria la misma notificacion varias veces al mismo telefono.
+
+Un token que FCM reporta como muerto se da de baja solo. Si no, la tabla acumula destinos que fallan en cada envio y el conteo de "fallidos" deja de significar nada.
+
+`DISPOSITIVO_PUSH` no es `DISPOSITIVO_CONFIABLE`: aquel autentica —permite saltar el segundo factor— y este solo dice a donde entregar un aviso. Por eso vive en `public` y no en `auth`.
+
+---
+
 ## Lo que falta
 
 1. **Correo** para códigos 2FA, invitaciones y recuperación. Hoy el código se escribe en el log fuera de producción (`[DEV] Codigo de verificacion: 123456`), que es lo que permite desarrollar sin servidor de correo.

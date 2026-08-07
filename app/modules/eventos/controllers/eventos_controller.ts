@@ -53,6 +53,29 @@ export default class EventosController {
 
   // ──────────────────────────────────────────────────────────────── mesas
 
+  async listarMesas(ctx: HttpContext) {
+    return responder.lista(ctx, await this.servicio.listarMesas(ctx.request.param('id_evento')))
+  }
+
+  async mostrarMesa(ctx: HttpContext) {
+    const m = await this.servicio.obtenerMesa(
+      ctx.request.param('id_evento'),
+      ctx.request.param('id_mesa')
+    )
+    return responder.ok(ctx, m)
+  }
+
+  /** El `codigo_qr` no se toca aquí: regenerarlo tiene su propia ruta. */
+  async actualizarMesa(ctx: HttpContext) {
+    const datos = await mesaValidator.validate(ctx.request.body())
+    const m = await this.servicio.actualizarMesa(
+      ctx.request.param('id_evento'),
+      ctx.request.param('id_mesa'),
+      datos
+    )
+    return responder.ok(ctx, m)
+  }
+
   async agregarMesa(ctx: HttpContext) {
     const datos = await mesaValidator.validate(ctx.request.body())
     return responder.creado(ctx, await this.servicio.agregarMesa(ctx.request.param('id_evento'), datos))

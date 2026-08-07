@@ -25,6 +25,10 @@ export default class ParticipacionesController {
     return responder.lista(ctx, filas)
   }
 
+  async mostrar(ctx: HttpContext) {
+    return responder.ok(ctx, await this.servicio.obtener(ctx.request.param('id_participacion')))
+  }
+
   /** El mesero aparta su lugar. El sujeto sale del token, nunca del cuerpo. */
   async apartar(ctx: HttpContext) {
     const p = await this.servicio.apartar(ctx.request.param('id_evento'), ctx.sujeto.uuid)
