@@ -972,6 +972,75 @@ Se usa el SDK de S3 y no el cliente propio de Supabase a proposito: si algun dia
 
 ---
 
+### Decisiones cerradas con el frontend
+
+| | |
+|---|---|
+| Callback | `/auth/callback` — produccion y local |
+| CORS | `CORS_ORIGIN`, sin barra final |
+| Cookie de refresh | `Secure` condicionado al entorno, `SameSite=Lax` |
+| `emitido_en` | En todas las cargas del canal, inyectado por el puente |
+| Resincronizacion | REST tras reconectar. Responsabilidad del cliente |
+| Reconexion al renovar token | Responsabilidad del cliente |
+| Eventos agregados de dashboard | No, en v1 |
+
+#### Por que `SameSite=Lax` basta
+
+El panel (`sgeb.mediocres.mx`) y el proveedor (`auth.sgeb.mediocres.mx`) comparten dominio registrable, asi que el navegador los trata como **same-site**: `Lax` deja pasar la cookie en el `fetch` de renovacion.
+
+En local pasa lo mismo — `localhost:5173` y `localhost:3333` son same-site porque **las cookies ignoran el puerto**.
+
+Si el panel se mudara a otro dominio registrable, habria que pasar a `SameSite=None`, que exige `Secure` y por tanto HTTPS en todos lados.
+
+#### `Secure` condicionado al entorno
+
+En local el proveedor corre sobre `http` y el navegador descartaria la cookie **sin avisar**: el sintoma seria un SSO-1006 al renovar, que apunta a cualquier lado menos a la causa. Fuera de desarrollo va siempre activo.
+
+#### CORS sin comodin, ni siquiera en desarrollo
+
+Antes era `origin: app.inDev ? true : []`. Con `credentials: true`, un origen comodin permitiria que cualquier pagina abierta en el navegador de quien desarrolla hiciera peticiones autenticadas contra el API usando sus cookies. Un navegador de trabajo tiene decenas de pestanas.
+
+**Sin barra final**: el navegador compara el origen exacto y `https://sgeb.mediocres.mx/` no coincide con `https://sgeb.mediocres.mx`.
+
+#### `emitido_en` lo pone el puente, no los servicios
+
+Asi ningun emisor puede olvidarlo y todas las cargas usan el mismo reloj. Es el mismo argumento por el que el puente es el unico punto que conoce a la vez el dominio y el transporte.
+
+**No es un numero de secuencia, y no hace falta**: las cargas llevan estado completo, no deltas. `mesa:cambio` dice "la mesa 7 quedo ocupada", no "+1 ocupada". Aplicar dos veces el mismo evento es idempotente, y uno viejo que llega tarde solo repone un valor que ya era correcto.
+
+---
+
+### Invitaciones: la unica via de alta de personal
+
+El mesero nunca se registra solo. El capitan invita, y el deeplink del correo es lo unico que permite crear la cuenta — eso evita que cualquiera se de alta y aparezca en las listas de asignacion.
+
+| Ruta | Que hace |
+|---|---|
+| `GET /usuarios/invitaciones` | El capitan ve las suyas, el admin todas |
+| `POST /usuarios/invitaciones` | Emite el deeplink y manda el correo |
+| `DELETE /usuarios/invitaciones/:id` | Revoca y **libera el correo** |
+| `POST /usuarios/invitaciones/:id/reenviar` | Revoca la anterior y emite una nueva |
+
+#### El deeplink se devuelve UNA vez
+
+En la base solo queda el SHA-256 del token, asi que un volcado no permite completar registros ajenos. **El listado nunca lo devuelve**, ni hasheado: quien tenga acceso al panel podria completar el registro de otra persona.
+
+Si el correo no llega, se reenvia —lo que emite un token nuevo—, no se recupera el viejo.
+
+#### Reenviar no reutiliza el token
+
+Si el correo no llego, el token viejo sigue vivo 72 horas. Reemplazarlo cierra esa ventana y reinicia el plazo, que es lo que el capitan espera al reenviar.
+
+#### Revocar libera el correo
+
+El indice parcial `invitacion_una_pendiente_por_correo` solo admite una pendiente por direccion, asi que sin revocar la anterior no se puede reinvitar. Una ya `usada` no se revoca (SSO-3002): la cuenta existe, y para darla de baja se usa `PATCH /usuarios/{uuid}`.
+
+#### `expirada` se deriva, no se persiste
+
+El estado se calcula comparando `expira_en` con la hora actual. Persistirlo exigiria una tarea que recorriera la tabla marcandolas: un proceso mas que mantener para un dato derivable con una comparacion.
+
+---
+
 ## Lo que falta
 
 1. **Correo** para códigos 2FA, invitaciones y recuperación. Hoy el código se escribe en el log fuera de producción (`[DEV] Codigo de verificacion: 123456`), que es lo que permite desarrollar sin servidor de correo.

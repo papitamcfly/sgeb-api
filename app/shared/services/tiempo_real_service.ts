@@ -193,7 +193,15 @@ export class TiempoRealService {
   private registrarPuentes() {
     const puente = <T extends { idEvento: number }>(nombre: string) => {
       emitter.on(nombre as never, (carga: T) => {
-        this.io?.to(salaEvento(carga.idEvento)).emit(nombre, carga)
+        /**
+         * `emitido_en` se inyecta aquí y no en cada servicio: así ningún emisor
+         * puede olvidarlo y todas las cargas usan el mismo reloj. Es el mismo
+         * argumento por el que este es el único punto que conoce a la vez el
+         * dominio y el transporte.
+         */
+        this.io
+          ?.to(salaEvento(carga.idEvento))
+          .emit(nombre, { ...carga, emitido_en: new Date().toISOString() })
       })
     }
 

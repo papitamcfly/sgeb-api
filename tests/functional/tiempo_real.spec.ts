@@ -301,6 +301,25 @@ test.group('Canal de tiempo real', (group) => {
     assert.isFalse(recibido)
   })
 
+  test('toda carga lleva emitido_en, inyectado por el puente', async ({ assert }) => {
+    const { evento, tCap, part } = await escenario()
+    const s = seguir(await conectar(url, tCap))
+    await unirse(s, evento.id)
+
+    const espera = esperar<{ emitido_en: string }>(s, 'cupo:actualizado')
+    await part.apartar(evento.id, UUID_MESERO)
+    const carga = await espera
+
+    /**
+     * Lo pone el puente y no cada servicio: así ningún emisor puede olvidarlo y
+     * todas las cargas usan el mismo reloj.
+     */
+    assert.isString(carga.emitido_en)
+    assert.isFalse(Number.isNaN(Date.parse(carga.emitido_en)))
+    /** Reloj del servidor: la marca no puede venir del futuro. */
+    assert.isAtMost(Date.parse(carga.emitido_en), Date.now() + 1000)
+  })
+
   test('salir de la sala deja de recibir', async ({ assert }) => {
     const { evento, tCap, part } = await escenario()
     const s = seguir(await conectar(url, tCap))

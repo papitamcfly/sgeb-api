@@ -1,6 +1,7 @@
 import { inject } from '@adonisjs/core'
 import type { HttpContext } from '@adonisjs/core/http'
 import env from '#start/env'
+import app from '@adonisjs/core/services/app'
 import { SsoError } from '#modules/identidad/errores_sso'
 import { LlaveFirmaService } from '#modules/identidad/services/llave_firma_service'
 import { TokenService, type TokensEmitidos } from '#modules/identidad/services/token_service'
@@ -287,7 +288,24 @@ export default class ProtocoloController {
 
     response.cookie('sgeb_refresh', tokens.refresh_token, {
       httpOnly: true,
-      secure: true,
+      /**
+       * `Secure` fuera de desarrollo. En local el proveedor corre sobre `http`
+       * y el navegador descartaría la cookie sin avisar: el síntoma sería un
+       * SSO-1006 al renovar, que apunta a cualquier lado menos a la causa.
+       *
+       * Staging y producción son HTTPS, así que ahí siempre va activo.
+       */
+      secure: !app.inDev,
+      /**
+       * `Lax` y no `None`. El panel (`sgeb.mediocres.mx`) y el proveedor
+       * (`auth.sgeb.mediocres.mx`) comparten dominio registrable, así que el
+       * navegador los trata como **same-site** y `Lax` deja pasar la cookie.
+       * En local, `localhost:5173` y `localhost:3333` también son same-site —
+       * las cookies ignoran el puerto—.
+       *
+       * Si el panel se mudara a otro dominio registrable, habría que pasar a
+       * `SameSite=None`, que exige `Secure` y por tanto HTTPS en todos lados.
+       */
       sameSite: 'lax',
       path: '/token',
     })

@@ -45,6 +45,12 @@ export default await Env.create(new URL('../', import.meta.url), {
    */
   SOCKET_CORS_ORIGIN: Env.schema.string(),
 
+  /**
+   * Orígenes autorizados del API y del proveedor, separados por coma y **sin
+   * barra final**: el navegador compara el origen exacto.
+   */
+  CORS_ORIGIN: Env.schema.string(),
+
   /*
   |----------------------------------------------------------------------------
   | Correo saliente (Mailtrap por SMTP)

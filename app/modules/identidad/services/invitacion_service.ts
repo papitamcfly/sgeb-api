@@ -6,7 +6,9 @@ import Invitacion from '#modules/identidad/models/invitacion'
 import Usuario from '#modules/identidad/models/usuario'
 import { inject } from '@adonisjs/core'
 import { SsoError } from '#modules/identidad/errores_sso'
+import { errores } from '#shared/errors/sgeb_error'
 import { CorreoService } from '#shared/services/correo_service'
+import logger from '@adonisjs/core/services/logger'
 
 const HORAS_VIGENCIA = 72
 
@@ -89,6 +91,91 @@ export class InvitacionService {
     await this.correo.invitacion(correo, datos.nombre, deeplink)
 
     return { token, deeplink, expiraEn }
+  }
+
+  /**
+   * Invitaciones del sistema, para que el capitán vea a quién falta responder.
+   *
+   * **Nunca devuelve el token**, ni siquiera hasheado: quien tenga acceso al
+   * panel podría completar el registro de otra persona. El deeplink solo existe
+   * una vez, en la respuesta del alta y en el correo.
+   */
+  async listar(filtros: { estado?: string; idEmisor?: number } = {}) {
+    const q = Invitacion.query().orderBy('creado_en', 'desc').limit(200)
+
+    if (filtros.estado) q.where('estado', filtros.estado)
+    if (filtros.idEmisor) q.where('id_emisor', filtros.idEmisor)
+
+    const filas = await q
+
+    /**
+     * El estado `expirada` se deriva, no se persiste: una tarea que recorriera
+     * la tabla marcándolas sería un proceso más que mantener para un dato que
+     * se calcula con una comparación de fechas.
+     */
+    return filas.map((i) => {
+      const vencida = i.estado === 'pendiente' && i.expiraEn < DateTime.now()
+      return { ...i.serialize(), estado: vencida ? 'expirada' : i.estado }
+    })
+  }
+
+  /**
+   * Revoca una invitación pendiente.
+   *
+   * Se usa cuando el capitán se equivocó de correo o la persona ya no entra al
+   * equipo. **Libera el correo**: el índice parcial solo admite una pendiente
+   * por dirección, así que sin revocar la anterior no se puede reinvitar.
+   */
+  async revocar(idInvitacion: number, uuidResponsable: string): Promise<Invitacion> {
+    const inv = await Invitacion.find(idInvitacion)
+    if (!inv) throw errores.noEncontrado('INVITACION', idInvitacion)
+
+    if (inv.estado === 'usada') {
+      throw new SsoError('SSO-3002', {
+        tecnico:
+          `INVITACION id=${idInvitacion} ya usada por id_usuario=${inv.idUsuarioCreado}. ` +
+          `La cuenta existe: para darla de baja use PATCH /usuarios/{uuid}.`,
+      })
+    }
+    if (inv.estado === 'revocada') return inv
+
+    inv.estado = 'revocada'
+    await inv.save()
+
+    logger.info(
+      { idInvitacion, correo: inv.correo, responsable: uuidResponsable },
+      'Invitación revocada'
+    )
+    return inv
+  }
+
+  /**
+   * Reenvía la invitación: revoca la anterior y emite una nueva.
+   *
+   * No se reutiliza el token original a propósito. Si el correo no llegó, el
+   * token viejo sigue vivo 72 horas; reemplazarlo cierra esa ventana y además
+   * reinicia el plazo, que es lo que el capitán espera al reenviar.
+   */
+  async reenviar(idInvitacion: number, uuidResponsable: string) {
+    const vieja = await Invitacion.find(idInvitacion)
+    if (!vieja) throw errores.noEncontrado('INVITACION', idInvitacion)
+
+    if (vieja.estado === 'usada') {
+      throw new SsoError('SSO-3002', {
+        tecnico: `INVITACION id=${idInvitacion} ya usada. No hay nada que reenviar.`,
+      })
+    }
+
+    await this.revocar(idInvitacion, uuidResponsable)
+
+    return this.invitar({
+      idEmisor: vieja.idEmisor,
+      idRolDestino: vieja.idRolDestino,
+      nombre: vieja.nombre,
+      apellidoPaterno: vieja.apellidoPaterno,
+      apellidoMaterno: vieja.apellidoMaterno,
+      correo: vieja.correo,
+    })
   }
 
   /** Lee la invitación para pintar la pantalla S4. */

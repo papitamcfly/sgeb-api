@@ -1,5 +1,7 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column } from '@adonisjs/lucid/orm'
+import { BaseModel, column, belongsTo } from '@adonisjs/lucid/orm'
+import type { BelongsTo } from '@adonisjs/lucid/types/relations'
+import Usuario from '#modules/identidad/models/usuario'
 
 export type ParticipacionEstado =
   | 'aparto'
@@ -26,6 +28,10 @@ export default class ParticipacionEvento extends BaseModel {
   declare idEvento: number
 
   /** Entero interno; hacia afuera el mesero se expone como `uuid_usuario`. */
+  /**
+   * Entero interno: **no sale del backend**. Hacia afuera viaja el UUID del
+   * usuario, que llega precargado en la relación `usuario`.
+   */
   @column({ columnName: 'id_usuario', serializeAs: null })
   declare idUsuario: number
 
@@ -56,4 +62,15 @@ export default class ParticipacionEvento extends BaseModel {
   /** Bloquea la asignación de mesas mientras sea false (SGEB-4005). */
   @column({ columnName: 'checklist_ok', serializeAs: 'checklist_ok' })
   declare checklistOk: boolean
+
+  /**
+   * El mesero. Se precarga al listar porque **sin él la fila es anónima**: el
+   * panel de selección, el de asistencia y el de pagos necesitan saber de quién
+   * es cada participación, y `id_usuario` no sale del backend.
+   *
+   * El modelo `Usuario` ya oculta su entero y su hash: lo que viaja es
+   * `uuid_usuario`, nombre, apellidos, correo y teléfono.
+   */
+  @belongsTo(() => Usuario, { foreignKey: 'idUsuario' })
+  declare usuario: BelongsTo<typeof Usuario>
 }

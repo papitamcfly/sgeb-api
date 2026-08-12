@@ -43,14 +43,30 @@ const HORAS_CANCELACION = 12
 export class ParticipacionService {
   constructor(private identidad: IdentidadService) {}
 
+  /**
+   * Participaciones del evento, **con la identidad del mesero**.
+   *
+   * Sin precargar al usuario, la respuesta trae `id_participacion` y estados
+   * pero nada que permita saber DE QUIÉN es cada fila: el panel de selección,
+   * el de asistencia y el de pagos quedarían mostrando filas anónimas.
+   *
+   * Se precarga aquí y no se deja al controlador porque toda vista que liste
+   * participaciones necesita el nombre; hacerlo opcional garantizaría que
+   * alguien lo olvide.
+   */
   async listarPorEvento(idEvento: number, estado?: ParticipacionEstado) {
-    const q = ParticipacionEvento.query().where('id_evento', idEvento)
+    const q = ParticipacionEvento.query()
+      .where('id_evento', idEvento)
+      .preload('usuario', (u) => u.select('uuid_usuario', 'nombre', 'apellido_paterno', 'apellido_materno', 'correo', 'telefono'))
     if (estado) q.where('estado', estado)
     return q.orderBy('id_participacion')
   }
 
   async obtener(id: number): Promise<ParticipacionEvento> {
-    const p = await ParticipacionEvento.find(id)
+    const p = await ParticipacionEvento.query()
+      .where('id_participacion', id)
+      .preload('usuario', (u) => u.select('uuid_usuario', 'nombre', 'apellido_paterno', 'apellido_materno', 'correo', 'telefono'))
+      .first()
     if (!p) throw errores.noEncontrado('PARTICIPACION_EVENTO', id)
     return p
   }

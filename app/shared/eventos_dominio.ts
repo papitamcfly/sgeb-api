@@ -21,6 +21,29 @@
  * por sala de evento).
  */
 
+/**
+ * Campo común a todas las cargas del canal.
+ *
+ * `emitido_en` lo pone el puente al publicar, no cada servicio: así ningún
+ * emisor puede olvidarlo y todos usan el mismo reloj.
+ *
+ * Para qué sirve del lado del cliente:
+ *
+ *  1. **Descartar lo viejo.** Tras una reconexión pueden llegar eventos
+ *     rezagados; comparar contra el estado local evita pintar hacia atrás.
+ *  2. **Medir el desfase.** Si la diferencia con el reloj del cliente crece,
+ *     algo va mal en el enlace y conviene resincronizar por REST.
+ *
+ * No es un número de secuencia, y no lo necesita: las cargas llevan **estado
+ * completo, no deltas**. `mesa:cambio` dice "la mesa 7 quedó ocupada", no
+ * "+1 ocupada". Aplicar dos veces el mismo evento es idempotente, y uno viejo
+ * que llega tarde solo repone un valor que ya era correcto.
+ */
+export interface Emitido {
+  /** ISO 8601 con zona. Reloj del servidor, no del dispositivo. */
+  emitido_en: string
+}
+
 /** Área §10.2.1 — Cupo de meseros. Disputado entre varios a la vez. */
 export interface CupoActualizado {
   idEvento: number

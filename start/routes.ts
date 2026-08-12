@@ -124,6 +124,12 @@ router
         router.get('/eventos/:id_evento/calificaciones', '#modules/comensal/controllers/comensal_controller.listarCalificaciones')
 
 
+        // ── Invitaciones: la única vía de alta de personal ────────────
+        router.get('/usuarios/invitaciones', '#modules/identidad/controllers/invitaciones_controller.listar')
+        router.post('/usuarios/invitaciones', '#modules/identidad/controllers/invitaciones_controller.crear')
+        router.delete('/usuarios/invitaciones/:id_invitacion', '#modules/identidad/controllers/invitaciones_controller.revocar')
+        router.post('/usuarios/invitaciones/:id_invitacion/reenviar', '#modules/identidad/controllers/invitaciones_controller.reenviar')
+
         // ── Usuarios: administración de la plantilla ──────────────────
         router.get('/roles', '#modules/identidad/controllers/usuarios_controller.listarRoles')
         router.get('/usuarios', '#modules/identidad/controllers/usuarios_controller.listar')

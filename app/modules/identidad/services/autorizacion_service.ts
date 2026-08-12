@@ -36,7 +36,10 @@ export const CLIENTES: Record<string, ClienteRegistrado> = {
   'sgeb-web-panel': {
     clientId: 'sgeb-web-panel',
     nombre: 'Panel del capitán',
-    redirectUris: ['https://sgeb.mediocres.mx/callback', 'http://localhost:5173/callback'],
+    redirectUris: [
+      'https://sgeb.mediocres.mx/auth/callback',
+      'http://localhost:5173/auth/callback',
+    ],
     postLogoutRedirectUris: ['https://sgeb.mediocres.mx/', 'http://localhost:5173/'],
     scopes: ['openid', 'perfil', 'sgeb.api'],
     tipo: 'web',
