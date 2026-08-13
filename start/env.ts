@@ -113,6 +113,26 @@ export default await Env.create(new URL('../', import.meta.url), {
   S3_BUCKET: Env.schema.string.optional(),
   S3_ACCESS_KEY_ID: Env.schema.string.optional(),
   S3_SECRET_ACCESS_KEY: Env.schema.string.optional(),
+
+  /*
+  |----------------------------------------------------------------------------
+  | reCAPTCHA v3
+  |----------------------------------------------------------------------------
+  |
+  | `CAPTCHA_MODO`: `log` (acepta cualquier token, para desarrollo) o `recaptcha`.
+  |
+  | v3 y no v2 a propósito: v2 muestra el desafío de las imágenes, y el usuario
+  | típico aquí es un mesero capturando su contraseña en el estacionamiento del
+  | salón, con una mano y con prisa. Un desafío visual ahí no protege, expulsa.
+  |
+  | El umbral por defecto es 0.5. Subirlo empieza a tirar usuarios legítimos
+  | —extensiones de privacidad, redes compartidas, modo incógnito— y aquí un
+  | falso positivo es un mesero que no puede entrar a trabajar.
+  */
+  CAPTCHA_MODO: Env.schema.enum(['log', 'recaptcha'] as const),
+  RECAPTCHA_SITE_KEY: Env.schema.string.optional(),
+  RECAPTCHA_SECRET_KEY: Env.schema.string.optional(),
+  RECAPTCHA_UMBRAL: Env.schema.string.optional(),
   /** Debe coincidir con el claim `iss`. Un token de otro emisor se rechaza. */
   SSO_ISSUER: Env.schema.string({ format: 'url' }),
   /** Claim `aud`. Un token emitido para otro destinatario no sirve aquí. */

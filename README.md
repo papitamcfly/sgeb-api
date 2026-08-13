@@ -1041,6 +1041,50 @@ El estado se calcula comparando `expira_en` con la hora actual. Persistirlo exig
 
 ---
 
+### Defensas de entrada: tres capas
+
+Cada una cubre lo que las otras no.
+
+| Capa | Que cubre | Que NO cubre |
+|---|---|---|
+| Bloqueo por cuenta (5/10 min) | Fuerza bruta contra un usuario | El ataque distribuido sobre muchas cuentas |
+| Limite por IP (SSO-4009) | El distribuido: 3 contrasenas contra 1000 correos | Botnets con IPs rotativas |
+| reCAPTCHA v3 (SSO-4008) | Automatizacion desde navegador | Peticiones con `curl` desde un servidor |
+
+**El hueco que faltaba era el del medio.** El bloqueo por cuenta no detiene a quien prueba tres contrasenas contra mil correos: eso nunca dispara un bloqueo, porque ninguna cuenta acumula cinco fallos.
+
+#### reCAPTCHA v3, no v2
+
+v2 muestra el desafio de las imagenes. El usuario tipico aqui es un mesero capturando su contrasena en el estacionamiento del salon, con una mano y con prisa: un desafio visual ahi no protege, **expulsa**.
+
+v3 puntua en silencio de 0.0 a 1.0 y deja que el servidor decida. Umbral 0.5: subirlo empieza a tirar usuarios legitimos —extensiones de privacidad, redes compartidas, incognito— y aqui un falso positivo es un mesero que no puede entrar a trabajar.
+
+**Es una senal de riesgo, no un muro.** Sin navegador no hay senal, asi que quien llame con `curl` simplemente omite el token. Por eso el token es **obligatorio** cuando esta activo: si fuera opcional, saltarselo seria tan facil como no enviarlo.
+
+**El error no revela la puntuacion.** Le diria al atacante que tan cerca esta del umbral.
+
+**La accion debe coincidir.** Sin esa comprobacion, un token obtenido en una pagina publica de bajo riesgo serviria para pasar el login.
+
+#### Se falla ABIERTO, a proposito
+
+Si Google no responde o falta la llave, **se deja pasar** y se registra el error.
+
+Fallar cerrado convertiria una caida de un tercero en una caida total del login, y con un evento en curso eso significa meseros que no pueden entrar a trabajar. El riesgo se acota porque las otras dos capas no dependen de Google.
+
+#### El limite por IP vive en la base, no en memoria
+
+Un contador en memoria se pierde al reiniciar y no se comparte entre procesos: bastaria con esperar un despliegue para reiniciar la cuenta. El costo es una escritura por peticion sensible —unas decenas por minuto en el peor caso— y a cambio el limite es real.
+
+Las ventanas son generosas a proposito: `login` permite 20 en 15 minutos. Un humano rara vez pasa de 5, y 20 deja margen para varias personas tras el mismo NAT —el WiFi de un salon— sin abrir la puerta a un ataque, que necesitaria miles.
+
+**Cuenta antes de procesar**, no solo los fallos: contar solo los fallidos dejaria pasar un ataque que acierta de vez en cuando.
+
+`sso:purgar` limpia esta tabla, que es la unica del modulo que recibe una fila por peticion.
+
+> **Nginx debe pasar la IP real** (`X-Forwarded-For`, `X-Real-IP`). Sin eso todo llega con la IP del proxy y el limite bloquea a todo el mundo a la vez.
+
+---
+
 ## Lo que falta
 
 1. **Correo** para códigos 2FA, invitaciones y recuperación. Hoy el código se escribe en el log fuera de producción (`[DEV] Codigo de verificacion: 123456`), que es lo que permite desarrollar sin servidor de correo.

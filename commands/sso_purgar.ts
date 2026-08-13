@@ -44,9 +44,17 @@ export default class SsoPurgar extends BaseCommand {
       .where('expira_en', '<', ahora)
       .delete()
 
+    /**
+     * El contador del límite por IP es la única tabla que recibe una fila por
+     * petición: sin purga crece con el tráfico.
+     */
+    const { LimitePeticionesService } = await import('#shared/services/limite_peticiones_service')
+    const peticiones = await new LimitePeticionesService().purgar()
+
     this.logger.success(
       `Purgado: ${flujos} flujos, ${codigos} códigos de autorización, ` +
-        `${verificacion} códigos 2FA, ${recuperacion} tokens de recuperación, ${sesiones} sesiones.`
+        `${verificacion} códigos 2FA, ${recuperacion} tokens de recuperación, ` +
+        `${sesiones} sesiones, ${peticiones} registros de límite por IP.`
     )
   }
 }

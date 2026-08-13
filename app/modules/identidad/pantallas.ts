@@ -22,10 +22,55 @@
  * cliente ni a qué URL devolver al usuario.
  */
 
+/**
+ * Script de reCAPTCHA v3.
+ *
+ * Se inyecta solo cuando hay `siteKey`: en modo `log` la pantalla no carga nada
+ * de Google, que es lo que permite desarrollar sin conexión y sin credenciales.
+ *
+ * v3 no dibuja nada visible salvo el aviso legal, que Google exige mostrar si se
+ * oculta su insignia. El token se pide justo antes de enviar —no al cargar—
+ * porque **caduca a los dos minutos**: pedirlo al abrir la pantalla haría que
+ * expirara mientras el usuario teclea su contraseña.
+ */
+function scriptCaptcha(siteKey: string | null, accion: string): string {
+  if (!siteKey) return ''
+  return `<script src="https://www.google.com/recaptcha/api.js?render=${esc(siteKey)}"></script>
+<script>
+(function () {
+  var form = document.querySelector('form');
+  if (!form) return;
+  form.addEventListener('submit', function (e) {
+    if (form.dataset.captchaListo === '1') return;
+    e.preventDefault();
+    grecaptcha.ready(function () {
+      grecaptcha.execute('${esc(siteKey)}', { action: '${esc(accion)}' }).then(function (t) {
+        var i = document.createElement('input');
+        i.type = 'hidden'; i.name = 'captcha'; i.value = t;
+        form.appendChild(i);
+        form.dataset.captchaListo = '1';
+        form.submit();
+      }).catch(function () {
+        // Si Google no responde, se envía igual: el servidor decide.
+        form.dataset.captchaListo = '1';
+        form.submit();
+      });
+    });
+  });
+})();
+</script>
+<p style="font-size:11px;color:#9a9a94;margin:18px 0 0;text-align:center;line-height:1.5">
+  Protegido por reCAPTCHA. Aplican la
+  <a href="https://policies.google.com/privacy" style="color:#9a9a94">política de privacidad</a> y los
+  <a href="https://policies.google.com/terms" style="color:#9a9a94">términos</a> de Google.</p>`
+}
+
 interface OpcionesPantalla {
   titulo: string
   subtitulo?: string
   cuerpo: string
+  /** Script de reCAPTCHA, vacío en modo `log`. */
+  captcha?: string
   error?: string | null
   /** Código del diccionario, visible en pantalla para que soporte lo pueda pedir. */
   codigo?: string | null
@@ -84,12 +129,14 @@ a{color:var(--tinta)}
 ${o.subtitulo ? `<p class="sub">${esc(o.subtitulo)}</p>` : ''}
 ${error}
 ${o.cuerpo}
+${o.captcha ?? ''}
 </div>
 </html>`
 }
 
 /** S1 — Iniciar sesión. */
 export function pantallaLogin(d: {
+  siteKey?: string | null
   ticket: string
   correo?: string
   error?: string | null
@@ -100,6 +147,7 @@ export function pantallaLogin(d: {
     subtitulo: 'Sistema de Gestión de Eventos de Banquetes',
     error: d.error,
     codigo: d.codigo,
+    captcha: scriptCaptcha(d.siteKey ?? null, 'login'),
     cuerpo: `<form method="post" action="/interno/login">
 <input type="hidden" name="ticket" value="${esc(d.ticket)}">
 <label for="correo">Correo</label>
@@ -148,6 +196,7 @@ export function pantallaVerificacion(d: {
 
 /** S4 — Completar registro por invitación. */
 export function pantallaRegistro(d: {
+  siteKey?: string | null
   token: string
   nombre: string
   correo: string
@@ -159,6 +208,7 @@ export function pantallaRegistro(d: {
     subtitulo: `Hola ${d.nombre}. Tu cuenta se creará con ${d.correo}`,
     error: d.error,
     codigo: d.codigo,
+    captcha: scriptCaptcha(d.siteKey ?? null, 'registro'),
     cuerpo: `<form method="post" action="/interno/registro">
 <input type="hidden" name="token" value="${esc(d.token)}">
 <label for="password">Contraseña</label>
@@ -184,7 +234,7 @@ export function pantallaRegistro(d: {
 }
 
 /** S5 — Recuperar acceso. */
-export function pantallaRecuperar(d: { ticket?: string; enviado?: boolean }): string {
+export function pantallaRecuperar(d: { ticket?: string; enviado?: boolean; siteKey?: string | null }): string {
   if (d.enviado) {
     return marco({
       titulo: 'Revisa tu correo',
@@ -200,6 +250,7 @@ export function pantallaRecuperar(d: { ticket?: string; enviado?: boolean }): st
   return marco({
     titulo: 'Recuperar acceso',
     subtitulo: 'Te enviaremos un enlace para crear una contraseña nueva.',
+    captcha: scriptCaptcha(d.siteKey ?? null, 'recuperacion'),
     cuerpo: `<form method="post" action="/interno/recuperar">
 <input type="hidden" name="ticket" value="${esc(d.ticket ?? '')}">
 <label for="correo">Correo</label>

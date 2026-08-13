@@ -8,6 +8,7 @@ import { TokenService, type TokensEmitidos } from '#modules/identidad/services/t
 import { AutorizacionService, CLIENTES } from '#modules/identidad/services/autorizacion_service'
 import { SesionSsoService } from '#modules/identidad/services/sesion_sso_service'
 import * as P from '#modules/identidad/pantallas'
+import { LimitePeticionesService } from '#shared/services/limite_peticiones_service'
 import Usuario from '#modules/identidad/models/usuario'
 
 /**
@@ -43,7 +44,8 @@ export default class ProtocoloController {
     private llaves: LlaveFirmaService,
     private tokens: TokenService,
     private autorizacion: AutorizacionService,
-    private sesion: SesionSsoService
+    private sesion: SesionSsoService,
+    private limite: LimitePeticionesService
   ) {}
 
   /**
@@ -164,6 +166,13 @@ export default class ProtocoloController {
 
   /** Canje del código y renovación. Cuerpo en x-www-form-urlencoded. */
   async token({ request, response }: HttpContext) {
+    /**
+     * Límite alto (60/15 min): la renovación es legítima y frecuente, y varias
+     * pestañas del panel comparten IP. Lo que corta es el canje masivo de
+     * códigos robados, no el uso normal.
+     */
+    await this.limite.exigir('token', request.ip())
+
     const b = request.body()
 
     try {

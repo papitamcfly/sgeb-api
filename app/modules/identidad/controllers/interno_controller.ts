@@ -8,6 +8,9 @@ import { SesionSsoService } from '#modules/identidad/services/sesion_sso_service
 import { InvitacionService } from '#modules/identidad/services/invitacion_service'
 import { RecuperacionService } from '#modules/identidad/services/recuperacion_service'
 import * as P from '#modules/identidad/pantallas'
+import env from '#start/env'
+import { CaptchaService } from '#shared/services/captcha_service'
+import { LimitePeticionesService } from '#shared/services/limite_peticiones_service'
 
 /**
  * Controlador INTERNO del proveedor — sirve las pantallas S1–S7.
@@ -37,12 +40,19 @@ function redirigir(response: HttpContext['response'], url: string) {
 
 @inject()
 export default class InternoController {
+  /** Nula en modo `log`: la pantalla no carga nada de Google. */
+  private get siteKey(): string | null {
+    return env.get('CAPTCHA_MODO') === 'recaptcha' ? (env.get('RECAPTCHA_SITE_KEY') ?? null) : null
+  }
+
   constructor(
     private autorizacion: AutorizacionService,
     private credenciales: CredencialesService,
     private sesion: SesionSsoService,
     private invitaciones: InvitacionService,
-    private recuperacion: RecuperacionService
+    private recuperacion: RecuperacionService,
+    private captcha: CaptchaService,
+    private limite: LimitePeticionesService
   ) {}
 
   // ══════════════════════════════════════════════════════════ S1 — login
@@ -54,7 +64,7 @@ export default class InternoController {
     } catch (error) {
       return this.error(response, error)
     }
-    return response.type('html').send(P.pantallaLogin({ ticket }))
+    return response.type('html').send(P.pantallaLogin({ ticket, siteKey: this.siteKey }))
   }
 
   async login(ctx: HttpContext) {
@@ -63,6 +73,20 @@ export default class InternoController {
     const correo = request.input('correo', '')
 
     try {
+      /**
+       * El límite por IP va PRIMERO, antes de tocar la base o llamar a Google:
+       * si el objetivo es saturar, no tiene sentido gastar una consulta y una
+       * petición externa por cada intento del atacante.
+       */
+      await this.limite.exigir('login', request.ip())
+
+      /**
+       * El captcha, antes de verificar credenciales. Si se hiciera después, un
+       * ataque automatizado obtendría igualmente la señal de "contraseña
+       * correcta o no" antes de ser rechazado.
+       */
+      await this.captcha.exigir(request.input('captcha'), 'login', request.ip())
+
       const flujo = await this.autorizacion.leerFlujo(ticket)
       const cliente = flujo.client_id === 'sgeb-ios-mesero' ? 'movil' : 'web'
 
@@ -101,7 +125,7 @@ export default class InternoController {
       return response
         .status(e.httpStatus ?? 500)
         .type('html')
-        .send(P.pantallaLogin({ ticket, correo, error: e.message, codigo: e.codigo }))
+        .send(P.pantallaLogin({ ticket, correo, siteKey: this.siteKey, error: e.message, codigo: e.codigo }))
     }
   }
 
@@ -131,6 +155,8 @@ export default class InternoController {
     const correo = (await db.from('usuario').where('id_usuario', idUsuario).first())?.correo ?? ''
 
     try {
+      await this.limite.exigir('verificacion', request.ip())
+
       const usuario = await this.credenciales.verificarCodigo({
         idUsuario,
         codigo: request.input('codigo', ''),
@@ -187,7 +213,7 @@ export default class InternoController {
       const inv = await this.invitaciones.leer(token)
       return response
         .type('html')
-        .send(P.pantallaRegistro({ token, nombre: inv.nombre, correo: inv.correo }))
+        .send(P.pantallaRegistro({ token, nombre: inv.nombre, correo: inv.correo, siteKey: this.siteKey }))
     } catch (error) {
       return this.error(response, error)
     }
@@ -196,6 +222,9 @@ export default class InternoController {
   async registro({ request, response }: HttpContext) {
     const token = request.input('token', '')
     try {
+      await this.limite.exigir('registro', request.ip())
+      await this.captcha.exigir(request.input('captcha'), 'registro', request.ip())
+
       await this.invitaciones.registrar({
         token,
         password: request.input('password', ''),
@@ -225,6 +254,7 @@ export default class InternoController {
               token,
               nombre: inv.nombre,
               correo: inv.correo,
+              siteKey: this.siteKey,
               error: e.message,
               codigo: e.codigo,
             })
@@ -240,10 +270,17 @@ export default class InternoController {
   async mostrarRecuperar({ request, response }: HttpContext) {
     return response
       .type('html')
-      .send(P.pantallaRecuperar({ ticket: request.input('ticket', '') }))
+      .send(P.pantallaRecuperar({ ticket: request.input('ticket', ''), siteKey: this.siteKey }))
   }
 
   async recuperar({ request, response }: HttpContext) {
+    /**
+     * El más expuesto de todos: acepta cualquier correo y no exige credenciales,
+     * así que sin límite sería un generador de correo gratuito hacia terceros.
+     */
+    await this.limite.exigir('recuperacion', request.ip())
+    await this.captcha.exigir(request.input('captcha'), 'recuperacion', request.ip())
+
     await this.recuperacion.solicitar(request.input('correo', ''), request.ip())
     /** Misma respuesta exista o no la cuenta (SSO-0002). */
     return response

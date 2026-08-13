@@ -2,6 +2,7 @@ import { inject } from '@adonisjs/core'
 import type { HttpContext } from '@adonisjs/core/http'
 import { responder } from '#shared/responder'
 import { ComensalService } from '#modules/comensal/services/comensal_service'
+import { LimitePeticionesService } from '#shared/services/limite_peticiones_service'
 import {
   solicitudValidator,
   estadoSolicitudValidator,
@@ -14,11 +15,20 @@ import {
  */
 @inject()
 export default class ComensalController {
-  constructor(private comensal: ComensalService) {}
+  constructor(
+    private comensal: ComensalService,
+    private limite: LimitePeticionesService
+  ) {}
 
   // ─────────────────────────────────────────────────── publico (sin token)
 
   async solicitar(ctx: HttpContext) {
+    /**
+     * Sin token de usuario, la IP es lo único que identifica al llamante. El
+     * anti-spam por mesa (SGEB-4014) cubre al comensal impaciente; esto cubre a
+     * quien recorre códigos QR desde fuera.
+     */
+    await this.limite.exigir('publico', ctx.request.ip())
     const { tipo } = await solicitudValidator.validate(ctx.request.body())
     const s = await this.comensal.solicitar(ctx.request.param('codigo_qr'), tipo)
 
@@ -36,6 +46,7 @@ export default class ComensalController {
   }
 
   async calificar(ctx: HttpContext) {
+    await this.limite.exigir('publico', ctx.request.ip())
     const datos = await calificacionValidator.validate(ctx.request.body())
     const c = await this.comensal.calificar(ctx.request.param('codigo_qr'), datos)
 
@@ -49,6 +60,7 @@ export default class ComensalController {
 
   /** Emite el token que el navegador del comensal conserva para calificar una vez. */
   async token(ctx: HttpContext) {
+    await this.limite.exigir('publico', ctx.request.ip())
     return responder.creado(ctx, { token_comensal: this.comensal.tokenComensal() })
   }
 

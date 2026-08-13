@@ -3,6 +3,8 @@ import env from '#start/env'
 import { CorreoService, CorreoLog, CorreoMailtrap } from '#shared/services/correo_service'
 import { PushService, PushLog, PushFirebase } from '#shared/services/push_service'
 import { AlmacenService, AlmacenLocal, AlmacenS3 } from '#shared/services/almacen_service'
+import { CaptchaService, CaptchaLog, CaptchaRecaptcha } from '#shared/services/captcha_service'
+import { LimitePeticionesService } from '#shared/services/limite_peticiones_service'
 
 /**
  * Elige el transporte de correo, push y almacenamiento según `CORREO_MODO`,
@@ -30,5 +32,12 @@ export default class MensajeriaProvider {
     this.app.container.singleton(AlmacenService, () =>
       env.get('ALMACEN_MODO') === 's3' ? new AlmacenS3() : new AlmacenLocal()
     )
+
+    this.app.container.singleton(CaptchaService, () =>
+      env.get('CAPTCHA_MODO') === 'recaptcha' ? new CaptchaRecaptcha() : new CaptchaLog()
+    )
+
+    /** No tiene variantes: el límite por IP siempre está activo. */
+    this.app.container.singleton(LimitePeticionesService, () => new LimitePeticionesService())
   }
 }

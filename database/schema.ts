@@ -727,6 +727,19 @@ export class ParticipacionEventoSchema extends BaseModel {
   declare puesto: any
 }
 
+export class PeticionIpSchema extends BaseModel {
+  static $columns = ['accion', 'creadoEn', 'idPeticion', 'ip'] as const
+  $columns = PeticionIpSchema.$columns
+  @column()
+  declare accion: string
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column({ isPrimary: true })
+  declare idPeticion: number
+  @column()
+  declare ip: string
+}
+
 export class RecetaIngredienteSchema extends BaseModel {
   static $columns = ['idBebida', 'idInsumo', 'idRecetaIng', 'ordenServido', 'tipoPorcion', 'valor'] as const
   $columns = RecetaIngredienteSchema.$columns

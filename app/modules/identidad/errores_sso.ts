@@ -149,6 +149,24 @@ export const CODIGOS_SSO = {
   },
 
   // ---------------------------------------------------------------- 5xxx
+  /**
+   * reCAPTCHA rechazado. NO se dice la puntuación al usuario: revelarla le
+   * diría al atacante qué tan cerca está del umbral.
+   */
+  'SSO-4008': {
+    http: 403,
+    mensaje: 'No pudimos verificar que eres una persona. Recarga la página e inténtalo de nuevo.',
+    oauth: 'access_denied',
+  },
+  /**
+   * Límite de peticiones por IP. Cubre el ataque distribuido sobre muchas
+   * cuentas, que nunca dispara el bloqueo por cuenta.
+   */
+  'SSO-4009': {
+    http: 429,
+    mensaje: 'Demasiadas solicitudes desde esta conexión. Espera unos minutos.',
+    oauth: 'temporarily_unavailable',
+  },
   'SSO-5001': {
     http: 500,
     mensaje: 'Ocurrió un problema inesperado. Intenta de nuevo en unos minutos.',
