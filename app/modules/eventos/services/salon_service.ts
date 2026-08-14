@@ -112,8 +112,13 @@ export class SalonService {
 
 export interface CrearSalon {
   nombre: string
-  direccion: string
+  calle: string
+  cp: string
+  colonia: string
+  ciudad: string
+  estado: string
   latitud: number
   longitud: number
   capacidadMaxMesas: number
+  capacidadPersonas: number
 }

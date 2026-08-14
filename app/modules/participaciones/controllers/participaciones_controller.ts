@@ -1,0 +1,79 @@
+import { inject } from '@adonisjs/core'
+import type { HttpContext } from '@adonisjs/core/http'
+import { responder } from '#shared/responder'
+import { ParticipacionService } from '#modules/participaciones/services/participacion_service'
+import { LlegadaService } from '#modules/participaciones/services/llegada_service'
+import {
+  estadoParticipacionValidator,
+  asignarMesaValidator,
+  vincularValidator,
+  llegadaValidator,
+} from '#modules/participaciones/validators/participacion_validator'
+
+@inject()
+export default class ParticipacionesController {
+  constructor(
+    private servicio: ParticipacionService,
+    private llegada: LlegadaService
+  ) {}
+
+  async listar(ctx: HttpContext) {
+    const filas = await this.servicio.listarPorEvento(
+      ctx.request.param('id_evento'),
+      ctx.request.input('estado')
+    )
+    return responder.lista(ctx, filas)
+  }
+
+  async mostrar(ctx: HttpContext) {
+    return responder.ok(ctx, await this.servicio.obtener(ctx.request.param('id_participacion')))
+  }
+
+  /** El mesero aparta su lugar. El sujeto sale del token, nunca del cuerpo. */
+  async apartar(ctx: HttpContext) {
+    const p = await this.servicio.apartar(ctx.request.param('id_evento'), ctx.sujeto.uuid)
+    return responder.creado(ctx, p)
+  }
+
+  async liberar(ctx: HttpContext) {
+    await this.servicio.liberar(ctx.request.param('id_participacion'), ctx.sujeto.uuid)
+    return responder.ok(ctx, null, `PARTICIPACION id=${ctx.request.param('id_participacion')} liberada por el mesero (RF-14).`)
+  }
+
+  async cambiarEstado(ctx: HttpContext) {
+    const { estado } = await estadoParticipacionValidator.validate(ctx.request.body())
+    const p = await this.servicio.cambiarEstado(ctx.request.param('id_participacion'), estado)
+    return responder.ok(ctx, p)
+  }
+
+  /**
+   * Confirmación de llegada. El sujeto viene del token: nadie confirma la
+   * llegada de otro, y el servicio lo verifica de nuevo (SGEB-1004).
+   */
+  async confirmarLlegada(ctx: HttpContext) {
+    const datos = await llegadaValidator.validate(ctx.request.body())
+    const r = await this.llegada.confirmar(
+      ctx.request.param('id_participacion'),
+      ctx.sujeto.uuid,
+      datos
+    )
+    return responder.creado(ctx, r)
+  }
+
+  async asignarMesa(ctx: HttpContext) {
+    const { idMesa } = await asignarMesaValidator.validate(ctx.request.body())
+    const a = await this.servicio.asignarMesa(ctx.request.param('id_participacion'), idMesa)
+    return responder.creado(ctx, a)
+  }
+
+  async vincularMesa(ctx: HttpContext) {
+    const { codigoQr } = await vincularValidator.validate(ctx.request.body())
+    const a = await this.servicio.vincularMesa(ctx.request.param('id_asignacion'), codigoQr)
+    return responder.ok(ctx, a)
+  }
+
+  async liberarMesa(ctx: HttpContext) {
+    await this.servicio.liberarMesa(ctx.request.param('id_asignacion'))
+    return responder.ok(ctx, null, `ASIGNACION_MESA id=${ctx.request.param('id_asignacion')} liberada.`)
+  }
+}

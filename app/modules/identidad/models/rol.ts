@@ -7,9 +7,9 @@ import { BaseModel, column } from '@adonisjs/lucid/orm'
  * cambiar un rol implica migrar permisos, no una operación de CRUD.
  */
 export default class Rol extends BaseModel {
-  static table = 'auth.rol'
+  static table = 'rol'
 
-  @column({ isPrimary: true })
+  @column({ isPrimary: true, columnName: 'id_rol', serializeAs: 'id_rol' })
   declare id: number
 
   @column()
@@ -17,4 +17,7 @@ export default class Rol extends BaseModel {
 
   @column()
   declare descripcion: string | null
+
+  @column()
+  declare activo: boolean
 }

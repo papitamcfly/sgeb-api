@@ -1,5 +1,5 @@
-import app from '@adonisjs/core/services/app'
 import { defineConfig } from '@adonisjs/cors'
+import env from '#start/env'
 
 /**
  * Configuration options to tweak the CORS policy. The following
@@ -14,11 +14,21 @@ const corsConfig = defineConfig({
   enabled: true,
 
   /**
-   * In development, allow every origin to simplify local front/backend setup.
-   * In production, keep an explicit allowlist (empty by default, so no
-   * cross-origin browser access is allowed until configured).
+   * Lista blanca explícita, desde `CORS_ORIGIN` (separada por comas).
+   *
+   * No se usa `true` ni siquiera en desarrollo: con `credentials: true`, un
+   * origen comodín permitiría que cualquier página abierta en el navegador del
+   * capitán hiciera peticiones autenticadas contra el API usando sus cookies.
+   * El navegador de una persona que desarrolla tiene decenas de pestañas.
+   *
+   * Sin barra final: el navegador compara el origen exacto y
+   * `https://sgeb.mediocres.mx/` no coincide con `https://sgeb.mediocres.mx`.
    */
-  origin: app.inDev ? true : [],
+  origin: env
+    .get('CORS_ORIGIN', '')
+    .split(',')
+    .map((o) => o.trim().replace(/\/$/, ''))
+    .filter(Boolean),
 
   /**
    * HTTP methods accepted for cross-origin requests.

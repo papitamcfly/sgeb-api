@@ -1,75 +1,38 @@
 import { defineConfig, drivers } from '@adonisjs/core/hash'
 
 /**
- * Hashing configuration.
+ * Hashing de contraseñas.
  *
- * This starter uses Node.js scrypt under the hood.
- * Node.js reference: https://nodejs.org/api/crypto.html#cryptoscryptpassword-salt-keylen-options-callback
+ * ────────────────────────────────────────────────────────────────────────────
+ *  POR QUÉ BCRYPT Y NO EL SCRYPT QUE TRAE EL STARTER KIT
+ * ────────────────────────────────────────────────────────────────────────────
+ * El Diccionario de Datos define `USUARIO.password_hash` como CHAR(60), que es
+ * la longitud exacta de un hash Bcrypt. El scrypt de AdonisJS produce una
+ * cadena en formato PHC bastante más larga, así que el INSERT falla con
+ * "value too long for type character(60)" — y falla en el registro del primer
+ * usuario, no en una prueba de carga.
+ *
+ * Se podría ensanchar la columna a VARCHAR(255) y usar scrypt, que es más
+ * resistente a ataques con GPU. Se optó por Bcrypt para respetar el
+ * Diccionario, que ya está aprobado y del que dependen los tres clientes y la
+ * documentación de validación. Si el equipo decide migrar a scrypt o argon2,
+ * hay que actualizar el Diccionario, ensanchar la columna y rehashear en el
+ * siguiente login de cada usuario (`hash.needsReHash`).
+ *
+ * `rounds: 10` da ~100 ms por verificación en el VPS de 1 GB. Subirlo encarece
+ * la fuerza bruta pero también cada login legítimo; conviene medirlo en el
+ * servidor real antes de moverlo.
  */
 const hashConfig = defineConfig({
-  /**
-   * Default hasher used by the application.
-   */
-  default: 'scrypt',
+  default: 'bcrypt',
 
   list: {
-    /**
-     * Scrypt is memory-hard, which makes brute-force attacks more expensive.
-     */
-    scrypt: drivers.scrypt({
-      /**
-       * Work factor (Node alias: N / cost).
-       * Higher values increase security and CPU+memory usage.
-       *
-       * Tuning guideline:
-       * - Start with 16384.
-       * - Increase gradually (for example 32768) and benchmark login/signup latency.
-       * - Keep values practical for your slowest production machine.
-       *
-       * Node constraint: value must be a power of two greater than 1.
-       */
-      cost: 16384,
-
-      /**
-       * Block size (Node alias: r / blockSize).
-       * Increases memory and CPU linearly.
-       *
-       * Tuning guideline:
-       * - Keep 8 unless you have a measured reason to change it.
-       * - Raise only with benchmark data, because memory usage grows quickly.
-       */
-      blockSize: 8,
-
-      /**
-       * Parallelization (Node alias: p / parallelization).
-       * Controls how many independent computations are performed.
-       *
-       * Tuning guideline:
-       * - Keep 1 for most applications.
-       * - Increase only after load testing if your infrastructure benefits from it.
-       */
-      parallelization: 1,
-
-      /**
-       * Maximum memory limit in bytes (Node alias: maxmem / maxMemory).
-       * Hashing throws if the estimated memory usage is above this limit.
-       * Node documents the check as approximately: 128 * N * r > maxmem.
-       *
-       * Tuning guideline:
-       * - Keep this aligned with your cost/blockSize choices.
-       * - Increase carefully on memory-constrained environments.
-       */
-      maxMemory: 33554432,
-    }),
+    bcrypt: drivers.bcrypt({ rounds: 10 }),
   },
 })
 
 export default hashConfig
 
-/**
- * Inferring types for the list of hashers you have configured
- * in your application.
- */
 declare module '@adonisjs/core/types' {
   export interface HashersList extends InferHashers<typeof hashConfig> {}
 }

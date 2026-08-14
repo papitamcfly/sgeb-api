@@ -1,5 +1,5 @@
 import env from '#start/env'
-import { createRemoteJWKSet, jwtVerify, errors as joseErrors } from 'jose'
+import { createLocalJWKSet, createRemoteJWKSet, jwtVerify, errors as joseErrors } from 'jose'
 import type { HttpContext } from '@adonisjs/core/http'
 import type { NextFn } from '@adonisjs/core/types/http'
 import { SgebError } from '#shared/errors/sgeb_error'
@@ -23,10 +23,35 @@ import { SgebError } from '#shared/errors/sgeb_error'
  * dispare una tormenta de peticiones al proveedor. Es lo que permite rotar la
  * llave de firma sin invalidar las sesiones en curso ni redesplegar la API.
  */
-const jwks = createRemoteJWKSet(new URL(env.get('SSO_JWKS_URL')), {
+/**
+ * ────────────────────────────────────────────────────────────────────────────
+ *  DE DÓNDE SALEN LAS LLAVES: la segunda costura de la extracción
+ * ────────────────────────────────────────────────────────────────────────────
+ * `remoto` es el modo definitivo y el que describe la arquitectura: la API pide
+ * el JWKS por HTTP al proveedor, como haría contra Keycloak o Auth0.
+ *
+ * `local` existe porque HOY el proveedor vive en el mismo proceso, y pedirle el
+ * JWKS por HTTP a uno mismo es frágil sin ganar nada: el servidor tendría que
+ * estar escuchando para poder validar su primer token, lo que rompe las pruebas
+ * y complica el arranque. En modo local se leen las mismas llaves públicas
+ * directamente de la base.
+ *
+ * **Lo que NO cambia entre modos es la validación**: mismo algoritmo, mismo
+ * emisor, misma audiencia, misma verificación de firma. Solo cambia el
+ * transporte. Al extraer el módulo se pone `SSO_JWKS_MODE=remoto` y ya.
+ */
+const jwksRemoto = createRemoteJWKSet(new URL(env.get('SSO_JWKS_URL')), {
   cacheMaxAge: 24 * 60 * 60 * 1000,
   cooldownDuration: 30_000,
 })
+
+async function llaves(): Promise<Parameters<typeof jwtVerify>[1]> {
+  if (env.get('SSO_JWKS_MODE') === 'remoto') return jwksRemoto
+
+  const { LlaveFirmaService } = await import('#modules/identidad/services/llave_firma_service')
+  const doc = await new LlaveFirmaService().jwks()
+  return createLocalJWKSet(doc as Parameters<typeof createLocalJWKSet>[0])
+}
 
 export interface Sujeto {
   /** Claim `sub`. UUID público del usuario. Única fuente de identidad. */
@@ -60,7 +85,7 @@ export default class JwtAuthMiddleware {
     const token = encabezado.slice(7)
 
     try {
-      const { payload, protectedHeader } = await jwtVerify(token, jwks, {
+      const { payload, protectedHeader } = await jwtVerify(token, await llaves(), {
         issuer: env.get('SSO_ISSUER'),
         audience: env.get('SSO_AUDIENCE'),
         /**

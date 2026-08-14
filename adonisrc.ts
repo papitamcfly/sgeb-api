@@ -4,7 +4,10 @@ import { defineConfig } from '@adonisjs/core/app'
 export default defineConfig({
   experimental: {},
 
-  commands: [() => import('@adonisjs/core/commands'), () => import('@adonisjs/lucid/commands')],
+  commands: [
+    () => import('@adonisjs/core/commands'),
+    () => import('@adonisjs/lucid/commands'),
+  ],
 
   providers: [
     () => import('@adonisjs/core/providers/app_provider'),
@@ -19,6 +22,14 @@ export default defineConfig({
 
     /** Enlaza IdentidadService. Punto de conmutación de la extracción del SSO. */
     () => import('#providers/identidad_provider'),
+
+    /** Monta socket.io sobre el servidor HTTP. Ver §10 del Entorno Tecnológico. */
+    () => import('#providers/tiempo_real_provider'),
+
+    () => import('@adonisjs/mail/mail_provider'),
+
+    /** Elige transporte de correo y push según CORREO_MODO y PUSH_MODO. */
+    () => import('#providers/mensajeria_provider'),
   ],
 
   preloads: [() => import('#start/routes'), () => import('#start/kernel')],

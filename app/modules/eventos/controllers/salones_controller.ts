@@ -25,7 +25,7 @@ export default class SalonesController {
   }
 
   async mostrar(ctx: HttpContext) {
-    return responder.ok(ctx, await this.servicio.obtener(ctx.request.param('id')))
+    return responder.ok(ctx, await this.servicio.obtener(ctx.request.param('id_salon')))
   }
 
   async crear(ctx: HttpContext) {
@@ -35,12 +35,29 @@ export default class SalonesController {
 
   async actualizar(ctx: HttpContext) {
     const datos = await salonValidator.validate(ctx.request.body())
-    return responder.ok(ctx, await this.servicio.actualizar(ctx.request.param('id'), datos))
+    return responder.ok(ctx, await this.servicio.actualizar(ctx.request.param('id_salon'), datos))
+  }
+
+  /**
+   * Fechas ocupadas del salón en un rango.
+   *
+   * Solo cuentan `publicado` y `en_curso`: un borrador es un plan, no un
+   * compromiso, y bloquear la fecha por él impediría agendar algo real.
+   */
+  async disponibilidad(ctx: HttpContext) {
+    const { EventoService } = await import('#modules/eventos/services/evento_service')
+    const eventos = await ctx.containerResolver.make(EventoService)
+    const r = await eventos.disponibilidadSalon(
+      ctx.request.param('id_salon'),
+      ctx.request.input('fecha_desde'),
+      ctx.request.input('fecha_hasta')
+    )
+    return responder.ok(ctx, r)
   }
 
   async desactivar(ctx: HttpContext) {
-    await this.servicio.desactivar(ctx.request.param('id'))
-    return responder.ok(ctx, null, `SALON id=${ctx.request.param('id')} activo=0.`)
+    await this.servicio.desactivar(ctx.request.param('id_salon'))
+    return responder.ok(ctx, null, `SALON id=${ctx.request.param('id_salon')} activo=0.`)
   }
 }
 
@@ -51,11 +68,16 @@ export default class SalonesController {
  */
 const salonValidator = vine.compile(
   vine.object({
-    nombre: vine.string().trim().minLength(3).maxLength(60),
-    direccion: vine.string().trim().minLength(5).maxLength(150),
+    nombre: vine.string().trim().minLength(3).maxLength(80),
+    calle: vine.string().trim().minLength(5).maxLength(50),
+    cp: vine.string().trim().fixedLength(5).regex(/^\d{5}$/),
+    colonia: vine.string().trim().minLength(2).maxLength(40),
+    ciudad: vine.string().trim().minLength(2).maxLength(40),
+    estado: vine.string().trim().minLength(2).maxLength(25),
     latitud: vine.number().min(-90).max(90),
     longitud: vine.number().min(-180).max(180),
-    capacidadMaxMesas: vine.number().positive().max(500),
+    capacidadMaxMesas: vine.number().positive().max(255),
+    capacidadPersonas: vine.number().positive().max(65535),
   })
 )
 

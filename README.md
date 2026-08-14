@@ -4,7 +4,7 @@ Backend del Sistema de Gestión de Eventos de Banquetes. Monolito modular: un so
 
 Este proyecto se generó con `create-adonisjs` (starter kit oficial de API para v7) y se adaptó al SGEB. **No es un esqueleto suelto**: trae `ace.js`, `bin/`, `config/`, `tsconfig.json` y todo el andamiaje del framework.
 
-**Verificado en Node 24.12.0:** `npm install` sin `ERESOLVE` · `npm run typecheck` sin errores · servidor arrancando y respondiendo con el envelope.
+**Verificado en Node 24.12.0 y PostgreSQL 16:** `npm install` sin `ERESOLVE` · `npm run typecheck` sin errores · servidor arrancando y respondiendo con el envelope · 37 tablas migradas, revertidas y re-aplicadas sin residuos · 29 modelos mapeados · 28 pruebas en verde.
 
 ---
 
@@ -228,16 +228,870 @@ En producción `technical_message` no sale: lo filtra `limpiarParaCliente`.
 
 ---
 
+## Base de datos
+
+**37 tablas**: las 29 del Diccionario de Datos en `public` y las 8 del módulo de identidad en `auth`. Seis migraciones, probadas contra PostgreSQL 16: aplicadas, revertidas y re-aplicadas sin dejar tablas ni tipos ENUM huérfanos.
+
+| Migración | Contenido |
+|---|---|
+| `…001_create_usuarios_y_roles` | ROL (con los 3 roles precargados), USUARIO, DATOS_BANCARIOS |
+| `…002_create_auth_module_tables` | Esquema `auth` + sus 8 tablas |
+| `…003_create_eventos_core` | SALON, EVENTO, MESA, PARTICIPACION_EVENTO, CONFIRMACION_LLEGADA, ASIGNACION_MESA |
+| `…004_create_checklists_y_menu` | CHECKLIST y sus 3 tablas, INSUMO, BEBIDA, RECETA_INGREDIENTE, ENVASE |
+| `…005_create_iot_y_ordenes` | CUBAITOR, CONFIG_DISPENSADO, ORDEN, ORDEN_DETALLE, DISPENSADO |
+| `…006_create_comunicacion_y_cierre` | CRONOGRAMA_EVENTO, SOLICITUD_SERVICIO, NOTIFICACION, CALIFICACION, PAGO, REPORTE_MERMA, MERMA_DETALLE |
+
+Del módulo de identidad son 8 y no 9: `CREDENCIAL_BIOMETRICA` no se crea, porque la decisión v0.4 retiró la biometría como método de autenticación y la confirmación de llegada usa atestación local.
+
+### Dónde vive USUARIO, y por qué
+
+En `public`, no en `auth`. Es la tabla más referenciada del sistema —EVENTO la apunta dos veces, más PARTICIPACION_EVENTO, REPORTE_MERMA y DATOS_BANCARIOS—; ponerla en `auth` obligaría a cinco tablas de dominio a apuntar hacia afuera, o a renunciar a esas llaves foráneas.
+
+**Es una tabla de dominio que además guarda credenciales**, no al revés. El esquema `auth` aloja solo las 8 tablas que existen únicamente para autenticar y que se mudan completas el día de la extracción.
+
+Por eso las FK cruzan en una sola dirección: `auth.*` → `public.usuario`, nunca al revés. Verificado por consulta y fijado por una prueba automatizada:
+
+```
+FKs public → auth: 0
+```
+
+Al extraer el módulo, sus tablas viajan con una proyección de USUARIO que se convierte en CUENTA con `uuid_usuario` como PK (Anexo D del Diccionario v3). Del lado del SGEB, USUARIO queda como copia sombra sin `password_hash`. **Ninguna tabla de dominio se ve afectada**, que es exactamente el objetivo.
+
+### Discrepancias encontradas en el Diccionario de Datos
+
+Se resolvieron al implementar. Conviene corregirlas también en el documento para que no reaparezcan.
+
+| # | Tabla | Discrepancia | Resolución |
+|---|---|---|---|
+| 1 | CONFIRMACION_LLEGADA | `longitud DECIMAL(10,8)` solo admite **dos** dígitos enteros (máx. 99.99999999). Torreón está en −103.4 | **DECIMAL(11,8)**, igual que en SALON |
+| 2 | SALON | Tipo `VARCHAR(30)` para `nombre`, pero las reglas permiten 80 | VARCHAR(80) |
+| 3 | EVENTO | Tipo `VARCHAR(40)` para `titulo`, pero las reglas permiten 120 | VARCHAR(120) |
+| 4 | DATOS_BANCARIOS | `titular_cuenta VARCHAR(50)` con regex `{3,500}` | VARCHAR(50); el regex es errata |
+| 5 | NOTIFICACION | `mensaje VARCHAR(100)` pero la sanitización dice "truncar a 255" | VARCHAR(100) |
+| 6 | ORDEN | El enumerado usa `entregada`; `openapi-sgeb.yaml` usaba `servida` | **Resuelto**: se adopta el Diccionario. `openapi-sgeb.yaml` v1.4 ya usa `entregada` |
+
+**La #1 es la grave.** No es un detalle de estilo: `DECIMAL(10,8)` provoca `numeric field overflow` al guardar cualquier longitud de tres dígitos, así que **toda confirmación de llegada fallaría en la sede del propio negocio**. Reproducido en PostgreSQL:
+
+```
+ERROR: numeric field overflow
+DETAIL: A field with precision 10, scale 8 must round to an absolute value less than 10^2.
+```
+
+La #6 quedó resuelta a favor del Diccionario: `openapi-sgeb.yaml` v1.4 cambió el filtro de `/eventos/{id}/ordenes` y la sección `barra` del dashboard (`servidas` → `entregadas`, más el conteo de `dispensando`, que antes no se reportaba).
+
+**Ojo con los dos enumerados de orden**, que se parecen y no son lo mismo:
+
+| Tabla | Valores |
+|---|---|
+| `ORDEN.estado` | pendiente · en_preparacion · **dispensando** · **entregada** · cancelada · pausada_por_insumo |
+| `ORDEN_DETALLE.estado` | pendiente · **dispensada** · entregada · pausada_por_insumo |
+
+Un detalle puede estar `dispensada` mientras la orden sigue `en_preparacion`, porque otro renglón no ha salido de la barra.
+
+### Invariantes que impone la base, no la aplicación
+
+Están en la base porque una regla que solo vive en el código se salta desde una consola de `psql`, desde un script de migración de datos o desde un endpoint que alguien escriba sin conocerla. Cada uno tiene su prueba en `tests/unit/esquema_invariantes.spec.ts`.
+
+| Restricción | Qué impide |
+|---|---|
+| `datos_bancarios_una_activa_por_usuario` | Dos CLABEs activas del mismo mesero → ambigüedad al dispersar el pago |
+| `llave_firma_una_activa` | Dos llaves de firma activas → los tokens se firman de forma no determinista |
+| `invitacion_una_pendiente_por_correo` | Dos capitanes invitando a la misma persona → cuenta duplicada |
+| `participacion_evento (id_evento, id_usuario)` | Doble toque en la app → dos lugares del cupo consumidos |
+| `mesa (id_evento, etiqueta)` | Dos "Mesa 1" en el mismo evento. Entre eventos sí se permite |
+| `config_dispensado_pin_unico_por_evento` | Dos insumos en el mismo GPIO (SGEB-4019) → la bebida sale con el líquido equivocado |
+| `calificacion.token_comensal UNIQUE` | Segunda calificación del mismo comensal (SGEB-4010); es lo único que deduplica, porque el comensal es anónimo |
+| `CHECK evento_fin_posterior_a_inicio` | Eventos que terminan antes de empezar |
+| `CHECK evento_geocerca_valida` | Radios fuera de 10–1000 m |
+| `CHECK config_disponible_no_excede_cargado` | Más líquido disponible que cargado |
+
+Los índices parciales (los tres primeros) no se pueden hacer con un `UNIQUE` ordinario: hay que permitir muchas filas inactivas y solo una activa. Eso es exactamente un índice parcial con `WHERE`.
+
+### Base de pruebas
+
+```bash
+createdb sgeb_test
+NODE_ENV=test node ace migration:run
+node ace test unit          # 28 pruebas
+```
+
+Cada prueba corre en una transacción que se revierte al terminar, así el orden de ejecución no importa.
+
+**Detalle que muerde al probar restricciones:** PostgreSQL aborta la transacción completa al primer error, y toda consulta posterior responde `current transaction is aborted`. Por eso las violaciones esperadas se envuelven en un `SAVEPOINT` (helper `debeFallar`). Es el mismo patrón que necesita la aplicación cuando quiere intentar un `INSERT` y reaccionar al duplicado sin abortar toda la operación.
+
+---
+
+## Modelos
+
+Los 29 modelos Lucid, uno por tabla del Diccionario, distribuidos por módulo. Cada uno se prueba contra el esquema real en `tests/unit/modelos_dominio.spec.ts`: un `columnName` equivocado compila sin problema y truena en la primera consulta, así que esas pruebas mueven el fallo al CI.
+
+Tres decisiones que se repiten en todos:
+
+**`consume` en los DECIMAL.** El driver de PostgreSQL entrega los decimales como cadena para no perder precisión. Sin convertirlos, calcular la distancia a la geocerca haría aritmética con strings y daría `NaN`. Aplica a coordenadas, tarifas, costos, caudales y montos.
+
+**`serializeAs: null` en los enteros de usuario.** `Evento.idCapitan`, `ParticipacionEvento.idUsuario`, `ReporteMerma.idGeneradoPor` y `DatosBancarios.idUsuario` son llaves internas de JOIN y no salen del backend. Hacia afuera se expone el UUID, que el servicio resuelve vía `IdentidadService`.
+
+**Enmascarado en el propio modelo.** `DatosBancarios.clabe` y `Pago.clabeDestino` se serializan como `0121…8903`. Ponerlo en el modelo y no en cada controlador significa que no hay forma de olvidarlo. `Calificacion.tokenComensal` directamente no se serializa: devolverlo permitiría cruzar calificaciones con el orden de escaneo y deducir quién dijo qué, que es justo lo que el anonimato debe impedir.
+
+---
+
+## Módulo de identidad
+
+Proveedor OAuth 2.1 + OpenID Connect, **verificado de punta a punta**.
+
+### Antes del primer login
+
+```bash
+openssl rand -hex 32          # → SSO_MASTER_KEY en .env
+node ace sso:rotar-llave      # sin esto no hay con qué firmar (SSO-5001)
+```
+
+### Es SSO de verdad
+
+La sesión del proveedor (`auth.sesion_sso`) es lo que lo convierte en inicio de sesión único:
+
+```
+2. credenciales           → pantalla de verificación
+3. código 2FA             → 302 mx.mediocres.sgeb://callback?code=…
+   cookie de sesión SSO   → plantada
+4. canje                  → access_token, expira en 900 s
+
+5. SEGUNDA APP (panel web) con la misma sesión → 302 directo al callback
+   ¿pidió credenciales? NO  ← esto es el SSO
+
+6. logout                 → sesión destruida y cadena revocada
+7. tras logout            → vuelve a pedir credenciales
+```
+
+La cookie es `HttpOnly`, `Secure` y `SameSite=Lax`. Lax y no Strict a propósito: con Strict el navegador no la enviaría en el redirect de vuelta desde el cliente, y el salto entre aplicaciones nunca ocurriría.
+
+### Servicios
+
+| Servicio | Responsabilidad |
+|---|---|
+| `LlaveFirmaService` | Genera pares RSA/EC, cifra la privada en reposo, rota con periodo de gracia, publica el JWKS |
+| `TokenService` | Emite access/id/refresh, rota con detección de reúso |
+| `AutorizacionService` | Registro de clientes, validación PKCE, ciclo del código de autorización |
+| `CredencialesService` | Login, bloqueo por fuerza bruta, 2FA, dispositivos confiables |
+| `SesionSsoService` | La sesión del proveedor: lo que hace posible el salto entre apps |
+| `InvitacionService` | Alta por deeplink, con validación del dígito de control de la CLABE |
+| `RecuperacionService` | Restablecimiento por enlace de un solo uso |
+
+### Tres decisiones de fondo
+
+**Firma asimétrica, nunca HMAC.** La API valida con la llave pública. Con un secreto compartido, comprometer la API permitiría además *emitir* tokens, y la extracción del módulo dejaría de ser posible sin tocar ambos lados.
+
+**Llave privada cifrada con AES-256-GCM y llave maestra fuera de la base.** Si ambas vivieran en el mismo lugar, un volcado bastaría para firmar tokens arbitrarios. GCM y no CBC porque es autenticado: detecta manipulación en vez de devolver basura que parece una llave.
+
+**El JWKS publica activas y retiradas, nunca revocadas.** "Retirada" = ya no firma pero sus tokens valen hasta expirar; sacarla cerraría todas las sesiones vivas. "Revocada" = se comprometió, y debe dejar de validar de inmediato.
+
+### Las pantallas del proveedor
+
+Las siete (S1–S7) se sirven como HTML generado en el servidor, desde `pantallas.ts`. Sin framework de plantillas ni bundle: son formularios sin estado que se abren en el navegador del sistema y tienen que cargar rápido en el WiFi de un salón.
+
+Todo valor que viene de la petición pasa por `esc()`. El correo se repinta en el formulario tras un fallo, y sin escapar sería un XSS **en el origen del proveedor** — justo donde vive la cookie de sesión. Hay una prueba que lo fija.
+
+### Alta del mesero
+
+El mesero nunca se registra solo: el capitán invita, y el deeplink es lo único que permite crear la cuenta. La invitación vive 72 h, se guarda hasheada y es de un solo uso.
+
+El registro crea `USUARIO` y `DATOS_BANCARIOS` en **una sola transacción**, pero los datos viven separados: la CLABE nunca toca las tablas de autenticación. Se valida el dígito de control con el algoritmo del Banco de México — una CLABE mal tecleada que pasa a nómina termina en una transferencia rechazada o, peor, enviada a la cuenta de otra persona.
+
+### Recuperación de contraseña
+
+Restablecer **cierra todas las sesiones abiertas y levanta los bloqueos**. Quien recupera su contraseña suele sospechar que su cuenta está comprometida; dejar vivas las sesiones anteriores permitiría al intruso seguir dentro con un refresh token que ya no depende de esa contraseña.
+
+La respuesta es idéntica exista o no el correo (SSO-0002), y hay una prueba que compara los dos HTML byte a byte.
+
+### El patrón que hay que respetar al escribir servicios
+
+Tres bugs de la misma familia aparecieron al escribir las pruebas, y los tres eran explotables:
+
+```ts
+// ❌ El throw hace rollback y DESHACE la revocación
+await db.transaction(async (trx) => {
+  if (tokenReusado) {
+    await revocarCadena(trx)      // se pierde
+    throw new SsoError('SSO-1007')
+  }
+})
+
+// ✅ Marcar dentro, aplicar fuera
+let reusoDeUsuario: number | null = null
+try {
+  return await db.transaction(async (trx) => {
+    if (tokenReusado) { reusoDeUsuario = idUsuario; throw new SsoError('SSO-1007') }
+  })
+} finally {
+  if (reusoDeUsuario !== null) await this.revocarCadena(reusoDeUsuario)
+}
+```
+
+Afectaba a la revocación por reúso de refresh token, a la del segundo canje de código, y al contador de intentos del código 2FA. **Este último es el peor**: el contador nunca subía, así que el límite de 5 intentos no existía y un código de seis dígitos se podía adivinar por fuerza bruta sin freno.
+
+Regla general: **si un efecto debe sobrevivir al `throw`, no puede vivir en la transacción que el `throw` revierte.**
+
+### Cuidado con `response.redirect()`
+
+AdonisJS reenvía la query string de la petición original, así que un destino que ya lleva parámetros termina con dos signos de interrogación:
+
+```
+/interno/login?ticket=abc?response_type=code&client_id=…
+```
+
+El ticket queda contaminado y el flujo se rompe en el primer paso. Los controladores de identidad usan un helper `redirigir()` que arma el 302 a mano. **Aplica a cualquier redirect con parámetros en el resto del proyecto.**
+
+### Comandos
+
+```bash
+node ace sso:rotar-llave     # obligatorio antes del primer login
+node ace sso:purgar          # tarea diaria: flujos y códigos vencidos
+node ace sso:demo            # solo desarrollo: siembra usuarios de prueba
+```
+
+`sso:purgar` **no** borra `INTENTO_LOGIN`, `BLOQUEO_CUENTA` ni `REFRESH_TOKEN`. Los dos primeros son la evidencia para investigar un incidente; el tercero tiene que seguir existiendo para poder **detectar** su reúso — borrarlo haría que un token robado se viera igual que uno inventado.
+
+---
+
+## Servicios de dominio
+
+Escritos y probados: **eventos, participaciones y confirmación de llegada**. Cada regla del diccionario tiene su prueba en `tests/unit/dominio_reglas.spec.ts`.
+
+### Dos máquinas de estados
+
+El orden del enumerado **es** la secuencia válida; las transiciones fuera de orden responden SGEB-4011.
+
+```
+EVENTO         borrador → publicado → en_curso → finalizado
+                    ↘         ↘          ↘      cancelado
+PARTICIPACION  aparto → seleccionado → confirmo_asistencia →
+               confirmo_llegada → asignado → vinculo → salida
+```
+
+`finalizado`, `cancelado` y `salida` son terminales: de ellos cuelgan pagos ya calculados.
+
+### Reglas cubiertas
+
+| Código | Regla |
+|---|---|
+| SGEB-4001 | El salón no admite dos eventos vigentes el mismo día. En borrador todavía no ocupa: es un plan, no un compromiso |
+| SGEB-4002 | Cupo lleno. El conteo va dentro de la transacción con `forUpdate` |
+| SGEB-4005 | Sin checklist de montaje aprobado no hay asignación de mesas |
+| SGEB-4006 | Una mesa, un mesero a la vez |
+| SGEB-4007 | `num_mesas` no excede la capacidad del salón |
+| SGEB-4011 | Transiciones inválidas, y el doble apartado del mismo evento |
+| SGEB-4013 | Operar sobre un evento en el estado equivocado |
+| SGEB-4020 | El mesero no libera su lugar a menos de 12 h del inicio |
+| SGEB-4003/4004/4024/4025/4026 | Confirmación de llegada (ver abajo) |
+
+### Decisiones que vale la pena conocer
+
+**Publicar exige al menos una mesa.** Sin mesas no hay QR que escanear ni nada que asignar.
+
+**El radio de geocerca solo se edita en borrador.** Cambiarlo después invalidaría retroactivamente asistencias ya confirmadas, y de esas asistencias dependen pagos.
+
+**El QR lo genera el servidor.** Aceptarlo del cliente permitiría fijar un código conocido y suplantar la mesa de otro evento. Regenerarlo invalida el anterior de inmediato (SGEB-3003).
+
+**Vincular exige escanear el QR de esa mesa.** El código está impreso en la mesa, así que vincular implica haber estado ahí. Aceptar el QR de otra rompería esa evidencia.
+
+**Liberar una mesa no borra la asignación.** El histórico de quién atendió qué mesa es lo que permite resolver una queja del comensal después del evento.
+
+**`inicio` tiene que caer el mismo día que `fecha`.** Si no, el cronograma y la ventana de llegada se calculan contra días distintos y los meseros reciben avisos el día equivocado.
+
+### Confirmación de llegada
+
+El orden de las verificaciones importa, y va de lo específico a lo genérico: dispositivo → biometría → precisión del GPS → geocerca. Si se revisara la geocerca primero, alguien usando el teléfono de un compañero vería "acércate al recinto" estando dentro.
+
+**La distancia se calcula en el servidor** (Haversine) y nunca se acepta del cliente: si la app enviara la distancia ya resuelta, bastaría con mandar "estoy a 3 metros" para saltarse la geocerca sin siquiera falsear el GPS.
+
+**Todo intento queda registrado, exitoso o no.** Los fallidos son la evidencia con la que el capitán resuelve una disputa de asistencia, y de la asistencia depende el pago.
+
+SGEB-4026 se distingue de SGEB-4003 a propósito: uno afirma que el mesero está fuera, el otro admite que no se pudo determinar. Tratar una medición inconcluyente como asistencia denegada produce disputas que el registro no puede resolver.
+
+### Nueva traducción en el manejador de excepciones
+
+Las violaciones de `CHECK` (código `23514`) ahora se traducen a **SGEB-2008** en vez de caer en SGEB-5001. Llegar hasta la base significa que faltó un guardián en el servicio, pero el usuario sí puede corregir lo que capturó; el `technical_message` nombra el constraint para que el equipo sepa qué validación agregar.
+
+Salió de una prueba real: finalizar un evento cuyo `inicio` estaba en el futuro reventaba contra `evento_fin_posterior_a_inicio` y devolvía un error técnico sobre algo perfectamente entendible.
+
+---
+
+### API expuesta
+
+Los servicios ya tienen controladores, validadores y rutas.
+
+| Grupo | Middleware | Rutas |
+|---|---|---|
+| Publico (comensal por QR) | ninguno | `/v1/publico/mesas/:codigo_qr` |
+| Cualquier rol autenticado | auth, sujeto | perfil propio, consulta de eventos y participaciones |
+| Capitan y admin | auth, sujeto, rol | salones, alta y edicion de eventos, mesas, asignaciones |
+| Mesero | auth, sujeto, rol | apartar, liberar, confirmar llegada, vincular mesa |
+
+Dos decisiones que se ven en el reparto:
+
+**El capitan solo ve sus eventos; el admin ve todos.** Se resuelve en el controlador y no en el servicio, porque depende de quien pregunta, no de la regla en si.
+
+**Vincular la mesa es del mesero, no del capitan.** El capitan asigna desde el panel; vincular exige escanear el QR impreso, y eso solo lo puede hacer quien esta parado frente a la mesa.
+
+### Como se validan las entradas
+
+Los validadores de VineJS cubren formato, longitudes y rangos, con los limites del Diccionario. Las reglas que dependen de **otros datos** (que el salon este libre, que las mesas quepan, que el capitan tenga el rol) no caben ahi: necesitan consultar la base y viven en el servicio, con su propio codigo de negocio.
+
+El manejador global mapea cada regla de VineJS a su codigo:
+
+```
+titulo ausente        -> SGEB-2001    tipo: 'boda'          -> SGEB-2004
+titulo: 'ab'          -> SGEB-2003    radioGeocercaM: 5000  -> SGEB-2012
+```
+
+Y `data.errores_campos` conserva el detalle, porque el frontend pinta el error bajo cada campo.
+
+### De donde salen las llaves para validar el JWT
+
+`SSO_JWKS_MODE` decide el transporte:
+
+- `local` — se leen de la base, en el mismo proceso. Es lo correcto hoy: pedirse el JWKS por HTTP a uno mismo obligaria a estar escuchando para validar el primer token, lo que rompe las pruebas y complica el arranque.
+- `remoto` — se piden por HTTP al proveedor, como se haria contra Keycloak o Auth0. Es el modo definitivo.
+
+**Lo que no cambia entre modos es la validacion**: mismo algoritmo, mismo emisor, misma audiencia, misma verificacion de firma. Al extraer el modulo se pone `remoto` y ya. Es la misma costura que `IdentidadLocal` / `IdentidadRemota`.
+
+### `import type` rompe la inyeccion de dependencias
+
+```ts
+// MAL: el contenedor no puede inyectarlo
+import type { IdentidadService } from '#modules/identidad/identidad_service'
+
+// BIEN
+import { IdentidadService } from '#modules/identidad/identidad_service'
+```
+
+El contenedor lee los metadatos que TypeScript emite para los parametros del constructor. `import type` se borra al compilar, asi que el metadato queda como `Object` y la inyeccion falla en tiempo de ejecucion con `Cannot inject [Function: Object]`.
+
+**El typecheck no lo detecta**, porque a nivel de tipos todo cuadra. Solo aparece al pasar por HTTP con el contenedor resolviendo de verdad. Aplica a cualquier clase que se inyecte, en todo el proyecto.
+
+---
+
+### Menu, ordenes y dispensado
+
+El camino completo: el mesero levanta la ORDEN, cada renglon es un ORDEN_DETALLE, y cada apertura de electrovalvula deja un DISPENSADO que permite auditar cuanto liquido salio de verdad contra cuanto se pidio.
+
+#### De la receta a los mililitros
+
+`RecetaCalculo` traduce "una cuba en vaso de 350 ml" a "45 ml de ron y 252 de refresco". Los tres modos del Diccionario:
+
+| Modo | Que hace | Para que |
+|---|---|---|
+| `FIJO_ML` | Mililitros exactos, sin importar el envase | El alcohol. Una cuba lleva 45 ml de ron tanto en vaso como en jarra, o la bebida saldria mas fuerte solo por pedirla en envase grande |
+| `PROPORCION` | Fraccion del volumen del envase | Ingredientes que si deben escalar, como un jarabe |
+| `RESTO` | Lo que sobre | El refresco, que rellena hasta arriba |
+
+El factor de llenado por defecto es **0.85**: el hielo ocupa espacio, y llenar al 100 % derrama al servir.
+
+`ordenServido` importa fisicamente: el alcohol va primero y el refresco al final, porque el vaso lleva hielo y el orden inverso lo desborda. El calculo ordena por ese campo, no por el orden de captura.
+
+Los **segundos de valvula** salen del caudal calibrado del pin, no de una constante: cada manguera y cada altura de botella dan un caudal distinto, y usar un valor teorico serviria tragos de volumen equivocado.
+
+#### Botella vacia: se verifica TODO antes de abrir nada
+
+`procesarDetalle` calcula la receta, verifica **todos** los insumos, y solo entonces registra dispensados y descuenta volumen. Si alguno no alcanza, **nada se sirve**: la orden entera se pausa (SGEB-4008 / SGEB-4009) en vez de servir medio vaso y dejar al comensal con una bebida que igual hay que tirar.
+
+El descuento va dentro de la transaccion con `forUpdate` sobre la configuracion del pin. Sin el, dos meseros pidiendo cubas a la vez leerian ambos "quedan 200 ml" y el segundo serviria de una botella agotada.
+
+**La pausa se aplica FUERA de la transaccion**, con el patron ya conocido. Hacerla dentro la desharia el rollback del `throw`, la orden quedaria en `pendiente`, el mesero volveria a intentar y el sistema nunca registraria que hay una botella vacia esperando al capitan.
+
+#### Recarga
+
+`recargar()` es la contraparte operativa de SGEB-4009: el capitan cambia la botella fisica, marca la recarga, y las ordenes que esperaban ese insumo vuelven a la cola sin que el mesero las recapture. Tambien reactiva el insumo si estaba en `agotado`.
+
+#### Reporte del dispositivo
+
+La diferencia entre `segundos_calculado` y `segundos_real` delata una calibracion desviada antes de que se note en el inventario. Se guarda tal cual, sin corregirla: el volumen ya descontado fue el teorico, y ajustarlo aqui mezclaria dos fuentes de verdad.
+
+Con menos del 90 % de lo pedido el dispensado queda `parcial`: la bebida salio incompleta y el mesero tiene que verla antes de llevarla a la mesa. Sin reporte dentro del tiempo esperado, SGEB-5006 y valvula forzada a cierre.
+
+#### El Cubaitor caido no bloquea el evento
+
+Sin heartbeat dentro del umbral, el dashboard lo marca fuera de linea y se habilita el dispensado manual (RNF-13). Detener la barra porque un ESP32 dejo de responder seria peor que servir a mano.
+
+#### Validaciones del catalogo
+
+- Las porciones `PROPORCION` de una receta no pasan de 1.00. Sin esta comprobacion, dos ingredientes al 60 % pedirian 120 % del vaso y el RESTO saldria negativo justo al servir, frente al comensal.
+- Un insumo dentro de la receta de una bebida activa no se puede dar de baja (SGEB-4016): esa bebida quedaria imposible de preparar.
+- Marcar un insumo como `agotado` pausa las ordenes que lo usan. Preferible pausarlas de golpe a que cada mesero descubra el problema al intentar servir.
+
+---
+
+#### Rutas de la barra
+
+| Grupo | Rutas |
+|---|---|
+| Capitan y admin | alta de insumos, bebidas, recetas, envases; Cubaitor; configuracion de pines; recarga |
+| Cualquier rol autenticado | consulta del menu, tablero de ordenes, dispensar, reportar |
+| Mesero | levantar la orden |
+
+Tres decisiones visibles ahi:
+
+**El mesero consulta el menu pero no lo administra.** Lo necesita para levantar la orden en la mesa; darle de alta insumos no.
+
+**Levantar la orden es del mesero; dispensar no.** Quien atiende la barra puede ser un mesero con puesto `barra` o el propio capitan, asi que dispensar y reportar viven en el grupo de cualquier rol autenticado.
+
+**El semaforo del Cubaitor responde 200 aunque el dispositivo este caido.** No es un error de la peticion, es informacion: el evento continua con dispensado manual (RNF-13). Un 503 haria que el frontend pintara una alerta de fallo cuando lo que hay es una barra trabajando a mano.
+
+#### Capturar una violacion de constraint exige un SAVEPOINT
+
+```ts
+// MAL: el catch devuelve un error bonito sobre una transaccion ya inservible
+try {
+  return await Modelo.create(datos)
+} catch (e) { if (e.code === '23505') throw new SgebError('SGEB-4019') }
+
+// BIEN: el INSERT aislado en una transaccion anidada
+try {
+  return await db.transaction(async (trx) => Modelo.create(datos, { client: trx }))
+} catch (e) { if (e.code === '23505') throw new SgebError('SGEB-4019') }
+```
+
+PostgreSQL aborta la transaccion **completa** ante cualquier error, y toda consulta posterior responde `current transaction is aborted`. Si la llamada ocurre dentro de una transaccion mayor —otro servicio orquestando varios pasos, o una prueba envuelta en transaccion— el `catch` maneja el error pero deja la transaccion muerta, y lo siguiente falla con un mensaje que no tiene nada que ver.
+
+Aplicado en `configurarPin` (SGEB-4019) y en `apartar` (SGEB-4011). **Regla general: si vas a capturar una violacion de constraint y continuar, aislala en un savepoint.**
+
+Es hermano del patron de rondas anteriores. Uno dice que los efectos que deben sobrevivir al `throw` van fuera de la transaccion; este dice que los errores que se van a capturar van dentro de una anidada.
+
+---
+
+### Cierre: mermas y pagos
+
+Aqui se mueve dinero, asi que las reglas son mas duras que en el resto del dominio.
+
+**Tres bloqueos antes de calcular pagos**, en este orden:
+
+1. El evento debe estar `finalizado`. Calcular sobre uno en curso produce importes que despues hay que corregir a mano.
+2. Ninguna participacion sin salida verificada (SGEB-4015). Un mesero que no registro salida puede haberse ido antes de tiempo, y de eso depende si se le paga completo.
+3. Todos con CLABE vigente (SGEB-4012). Sin cuenta no hay a donde transferir, y descubrirlo al dispersar deja pagos a medias.
+
+**`GET /eventos/:id/cierre` existe para que el capitan vea que le falta ANTES de intentar pagar.** Recibir un error tras pulsar "pagar" es peor que tener la lista de pendientes delante en la pantalla de cierre.
+
+**El calculo es idempotente y respeta lo ya dispersado.** Volver a llamarlo no duplica pagos; un pago en estado `pagado` es historia y no se recalcula, aunque despues cambie la tarifa del evento. Uno `pendiente` o `fallido` si se actualiza: puede que la tarifa cambiara o que el mesero corrigiera su CLABE tras un rechazo.
+
+**`pagado` es terminal.** El pago se hace por transferencia manual, sin integracion con banca: no hay a quien preguntarle si de verdad llego, asi que revertirlo dejaria el registro contradiciendo al banco.
+
+**La CLABE se guarda como snapshot** en el pago y se enmascara al serializar (`0121…8909`). Si el mesero cambia de cuenta despues, el registro sigue diciendo a donde se transfirio realmente el dinero.
+
+**El costo de merma distingue "cero" de "sin valorar".** El capitan no siempre puede valorar un plato roto en el momento, asi que la respuesta reporta `costo_total` y `piezas_sin_costear` por separado: un total de $40 con cinco piezas sin costear dice algo distinto de un total de $40 con todo costeado.
+
+---
+
+### Checklists
+
+La pieza que faltaba en medio del flujo del evento: sin checklist de montaje aprobado no hay asignacion de mesas (SGEB-4005).
+
+Tres niveles que conviene no confundir:
+
+```
+CHECKLIST            la plantilla reutilizable: "Montaje de salon"
+CHECKLIST_ITEM       sus tareas: "Colocar manteleria", cantidad esperada 20
+CHECKLIST_INSTANCIA  la aplicacion concreta a UNA participacion
+CHECKLIST_RESPUESTA  lo que ese mesero marco, item por item
+```
+
+**El servidor calcula `completado`, no el cliente.** Si la app pudiera declararlo, bastaria con enviar `completado: true` para saltarse el montaje entero. Se deriva de las respuestas y se recalcula en cada llamada.
+
+**La aprobacion es del capitan y no automatica.** Que el mesero marque las casillas dice que el cree haber terminado; quien verifica es otra persona. Solo el checklist de tipo `montaje` pone `checklist_ok = true`; los de servicio y cierre se aprueban igual pero alimentan otros bloqueos.
+
+**Una instancia aprobada no se reabre.** Permitir editar despues dejaria al mesero atendiendo mesas con un montaje que ya no coincide con lo que el capitan aprobo.
+
+**Instanciar es idempotente.** Refrescar la pantalla de montaje no debe generar instancias duplicadas: el capitan veria el mismo checklist tres veces sin saber cual aprobar.
+
+**Editar la plantilla da de baja los items viejos, no los borra.** Las respuestas historicas apuntan a ellos, y borrarlos dejaria reportes de montaje sin poder decir que se reviso. Con instancias abiertas en eventos vigentes la edicion se bloquea (SGEB-4017): un mesero podria estar a media revision y ver como le cambian las tareas bajo los pies.
+
+---
+
+### Canal de tiempo real (socket.io)
+
+Complementa al API REST; no lo sustituye. Cuatro areas en la primera version (Entorno Tecnologico v0.6 §10.6): cupo de meseros, panel en vivo del evento, dispensado y botella vacia, y solicitudes del comensal.
+
+#### La capa de eventos de dominio
+
+Los servicios NO conocen el transporte. Publican hechos de negocio y un unico puente decide que hacer con ellos:
+
+```
+servicio  →  emitter.emit('alerta:insumo', {...})  →  puente  →  sala evento:{id}
+```
+
+Sin esa capa, las llamadas de emision acabarian dentro de `apartar`, `procesarDetalle`, `aprobar` y `confirmar`, y la regla de que un servicio no conoce la capa de transporte se rompe por la puerta de atras. Ademas cada servicio dejaria de poder probarse sin levantar un socket.
+
+`app/shared/eventos_dominio.ts` declara el registro tipado: un nombre mal escrito o una carga con la forma equivocada se detectan al compilar, no en produccion con un socket mudo.
+
+#### Los eventos se emiten DESPUES de que la transaccion confirma
+
+```ts
+return db.transaction(async (trx) => { ... })
+  .then(async (p) => {
+    await this.emitirCupo(idEvento)   // fuera de la transaccion
+    return p
+  })
+```
+
+Emitir dentro anunciaria un lugar ocupado que un rollback puede deshacer, y los demas meseros verian el cupo lleno sin que nadie lo haya tomado. Es la misma familia de cuidado que la regla de los efectos que deben sobrevivir al `throw`.
+
+#### Cuatro decisiones de seguridad
+
+**Autenticacion en el handshake, con el mismo JWT.** Un socket sin token valido se rechaza antes de unirse a nada. Mismo token, mismas llaves, mismo modo local/remoto.
+
+**El token viaja en `auth`, no en la query.** La cadena de consulta se escribe en los logs de acceso de Nginx y en el historial del navegador.
+
+**Pertenencia verificada contra la base.** Al unirse a la sala se comprueba que el capitan dirige el evento o que el mesero tiene participacion. Sin eso, cualquiera con token valido veria la operacion completa de un salon donde no trabaja. Hay pruebas que lo fijan.
+
+**El canal solo empuja; nunca recibe comandos.** Apartar, marcar checklist o dispensar se hacen por REST, que ya tiene validacion, autorizacion y envelope. Duplicar esa logica sobre sockets obligaria a mantener dos caminos con dos conjuntos de reglas.
+
+#### Por que socket.io y no SSE
+
+`@adonisjs/transmit` es de integracion nativa, pero al unirse a una sala el cliente necesita saber si quedo dentro o si fue rechazado. Con un canal unidireccional esa confirmacion no existe, y la ausencia de mensajes es indistinguible de "todavia no ha pasado nada". El acuse de recibo bidireccional resuelve exactamente eso.
+
+#### Requiere en infraestructura
+
+- **Nginx (VPS 2)**: habilitar el upgrade de conexion (`Connection: Upgrade`, `Upgrade: websocket`). Es trabajo del equipo de Servidores.
+- **`SOCKET_CORS_ORIGIN`**: origenes autorizados. Un comodin permitiria que cualquier sitio abriera un canal con el token de la victima si lograra leerlo.
+
+Con una sola instancia de AdonisJS no hace falta adaptador Redis. Si se escala a mas, si.
+
+---
+
+### Comensal
+
+La unica superficie sin autenticacion de usuario. El comensal es anonimo y su unica credencial es haber escaneado el QR impreso en la mesa. Eso obliga a dos cosas que no aplican en el resto del dominio:
+
+**Nada se identifica por quien eres, sino por que escaneaste.** El QR resuelve la mesa y el evento; el comensal no aporta identidad.
+
+**Cada escritura necesita su propio freno.** Sin cuenta no hay a quien limitar por rol ni a quien bloquear: los topes van por mesa y por token.
+
+#### Anti-spam por mesa, no por minuto
+
+SGEB-4014 rechaza una solicitud nueva mientras haya UNA pendiente en esa mesa. Es mas simple que contar peticiones por minuto y describe mejor la realidad: el comensal impaciente toca tres veces el boton, no monta un ataque. Y evita que la bandeja del mesero se llene de la misma peticion repetida.
+
+#### Por que existe `cancelada`
+
+Sin un estado terminal distinto de `atendida`, una solicitud que nadie atiende —el comensal se levanto, o pidio por error— **bloquearia la mesa para siempre** por el anti-spam: el comensal no podria volver a llamar y el mesero no podria cerrarla sin mentir diciendo que la atendio.
+
+No esta en el Diccionario (tabla 24) pero si en el OpenAPI. Es la errata E-9.
+
+#### El token del comensal lo emite el servidor
+
+`POST /publico/mesas/:codigo_qr/token` devuelve un UUID que el navegador conserva. Es lo unico que impide una segunda calificacion (SGEB-4010).
+
+Lo emite el servidor y no el cliente porque un token elegido por quien califica no serviria de nada: bastaria con inventar otro para volver a votar.
+
+**El token nunca vuelve en ninguna respuesta.** Devolverlo permitiria cruzar calificaciones con el orden de escaneo y deducir quien dijo que, que es justo lo que el anonimato debe impedir. Hay una prueba que verifica que no aparece ni siquiera serializando el modelo completo.
+
+#### Detalles que se ven en las pruebas
+
+- **La solicitud se preasigna al mesero que tiene la mesa vinculada**, para que aparezca en SU bandeja y no en una cola general que nadie siente suya. Sin mesero vinculado queda sin dueno, pero se registra igual: el comensal no debe quedarse sin poder llamar solo porque nadie tomo la mesa.
+- **El promedio de calificaciones es `null` sin datos, no cero.** Un promedio de 0 diria que el servicio fue pesimo; `null` dice que no hay datos.
+- **El capitan filtra por `puntuacion_max`**, que es el uso real: nadie revisa una lista de cincos.
+
+---
+
+### Cronograma y notificaciones
+
+El capitan define los tiempos de comida —entrada, fuerte, postre— y el sistema avisa a los meseros cuando toca. Sustituye al grito por el salon, que es como se coordina hoy.
+
+#### Idempotencia: lo que hace o rompe este modulo
+
+La tarea `cronograma:disparar` corre cada minuto durante los eventos. El proceso puede reiniciarse, y sin la bandera `disparado` los meseros recibirian "sirvan el postre" tres veces.
+
+**Peor que no avisar es avisar de mas**: el mesero deja de confiar en el aviso y empieza a ignorarlo.
+
+La bandera se marca **antes** de crear las notificaciones, dentro de la transaccion y con `forUpdate`. Si dos instancias corren a la vez, la segunda encuentra el hito ya marcado. Si la creacion de notificaciones falla, el rollback deshace tambien la marca y el siguiente ciclo lo reintenta — que es lo correcto: es peor no avisar que avisar tarde.
+
+#### Solo se notifica a quien esta en piso
+
+Los destinatarios son las participaciones en `confirmo_llegada`, `asignado` o `vinculo`. Un mesero que aparto pero no llego no necesita saber que toca el fuerte, y recibirlo lo confundiria.
+
+#### Eventos que cruzan la medianoche
+
+`hora_objetivo` es una hora del dia, no una marca temporal. Un XV que sirve el postre a las 00:30 tiene el hito con hora **menor** que el `inicio` (19:00). Sin ajuste se disparia apenas empezar el evento.
+
+La regla: si la hora objetivo cae antes del inicio, el hito es del dia siguiente. Hay una prueba que lo fija.
+
+#### Un hito disparado no se edita ni se elimina
+
+El aviso salio y los meseros ya actuaron. Editarlo reescribiria la historia del servicio (SGEB-4011); borrarlo dejaria su notificacion apuntando a un hito inexistente (SGEB-4016).
+
+#### Notificaciones
+
+La bandeja filtra por las participaciones del usuario, no por evento: un mesero solo ve lo suyo aunque trabaje en varios eventos. Marcar leida verifica la propiedad — sin eso, cualquiera podria marcar las de otro y hacer que se le pasara un tiempo de comida.
+
+Marcar leida es idempotente.
+
+#### Comando
+
+```bash
+node ace cronograma:disparar    # tarea programada, cada minuto durante eventos
+```
+
+---
+
+### Usuarios, bitacora y dashboard
+
+Con estos tres cierra la cobertura del contrato: **108 de 108 operaciones**.
+
+#### El alta NO crea una contrasena utilizable
+
+`password_hash` queda con `!sin-credencial`, un marcador que ningun hash Bcrypt puede producir. Nadie entra hasta que el proveedor emita la invitacion y el usuario defina la suya en la pantalla S4.
+
+Se hace asi y no dejando el campo nulo porque la columna es NOT NULL en el Diccionario, y relajarla abriria la puerta a cuentas sin credencial que algun camino olvidado pudiera aceptar.
+
+**Ninguna operacion de este modulo toca contrasenas.** Si las aceptara, el panel volveria a ser intermediario de credenciales y el flujo de codigo de autorizacion perderia su proposito.
+
+#### Desactivar revoca en cascada
+
+Refresh tokens, sesiones SSO y dispositivos confiables. Los access tokens vigentes expiran solos en ≤ 15 min: esa ventana es una decision consciente que evita consultar la base de identidad en cada peticion del API.
+
+**Nadie se desactiva a si mismo** (SGEB-4022): un admin que lo hiciera se dejaria fuera y a nadie mas con permisos.
+
+#### La bitacora nunca lanza
+
+Un fallo al escribirla no debe tumbar la operacion que la genero. Si el capitan desactiva una cuenta y la bitacora falla, la cuenta debe quedar desactivada igual: perder el registro es malo, dejar la cuenta activa es peor. Hay una prueba que lo verifica forzando el fallo.
+
+Se registran los cambios auditables —altas, bajas, cambios de rol, ediciones de CLABE—, **no cada lectura**: una bitacora que registra todo se vuelve ilegible y nadie la consulta.
+
+La CLABE tambien se enmascara ahi: la bitacora se consulta desde el panel y no puede filtrar lo que el modelo oculta.
+
+#### El dashboard agrega, no calcula
+
+Se escribio al final a proposito: no tiene logica de negocio propia. Si aqui apareciera una regla —"un mesero cuenta como presente si…"— seria senal de que esa regla le falta a su modulo.
+
+**Cada seccion se calcula por separado y el fallo de una no tumba el resto.** Un panel donde una tarjeta dice "no disponible" es infinitamente mas util que una pantalla en blanco con un 500, sobre todo a media fiesta. Cuando alguna falla, la respuesta lleva SGEB-0004 (exito parcial).
+
+`?secciones=barra,servicio` pide solo lo necesario: el panel del capitan en el salon refresca esas dos cada pocos segundos y no tiene por que recalcular el cierre cada vez.
+
+**`siguiente_accion`** es el campo que de verdad usa el mesero: en el salon, con el telefono en una mano y una charola en la otra, nadie navega menus.
+
+#### Alertas sin tabla de alertas
+
+`GET /eventos/:id/alertas` las **deriva del estado actual**. Guardarlas obligaria a mantenerlas sincronizadas con la realidad —marcar como resuelta la de una botella que ya se recargo—, y una alerta obsoleta es peor que ninguna.
+
+Incluye un aviso temprano al 15 % de volumen: a esa altura queda tiempo de cambiar la botella sin pausar nada.
+
+---
+
+### Correo y push
+
+Mismo patron que `IdentidadService`: clase abstracta, dos implementaciones, y una variable de entorno decide cual se inyecta. **Activar el envio real es cambiar una variable, no tocar codigo.**
+
+| Variable | Valores | Transporte |
+|---|---|---|
+| `CORREO_MODO` | `log` \| `mailtrap` | Log del servidor \| SMTP de Mailtrap |
+| `PUSH_MODO` | `log` \| `firebase` | Log del servidor \| Firebase Cloud Messaging |
+
+#### Lo que NO cambia entre modos
+
+El mensaje. Ambas implementaciones reciben el mismo objeto y arman el mismo contenido; solo cambia a donde va. Asi el flujo que se prueba en desarrollo es exactamente el que corre en produccion, en vez de ser uno simplificado que esconde los errores hasta el despliegue.
+
+#### Mailtrap por SMTP, no por su API
+
+Mailtrap ofrece dos hosts con el mismo protocolo, asi que **el mismo codigo sirve para los dos entornos**:
+
+```
+sandbox.smtp.mailtrap.io   captura sin entregar. Desarrollo y staging
+live.smtp.mailtrap.io      entrega de verdad. Produccion
+```
+
+Se eligio SMTP sobre la API a proposito: si algun dia se cambia de proveedor basta con reemplazar host, puerto y credenciales. Con la API habria que reescribir el cliente.
+
+El puerto 2525 porque el 25 y el 587 suelen estar bloqueados por los proveedores de nube.
+
+#### El envio va FUERA de la transaccion
+
+Si fallara dentro, el rollback borraria el codigo 2FA y el usuario recibiria un error generico. Asi el codigo queda guardado y el fallo se reporta como SSO-5003, que le dice al usuario que reintente el envio en vez de volver a capturar sus credenciales. Hay una prueba que lo fija con un transporte que siempre falla.
+
+#### El push NUNCA lanza
+
+`PushService.enviar` devuelve un resultado en vez de lanzar. Si el hito del cronograma se dispara y Firebase esta caido, el hito **debe quedar marcado como disparado igual**: la notificacion ya esta en la base y el mesero la ve al abrir la app, ademas de que le llega por el canal de tiempo real.
+
+Si lanzara, el rollback desharia la marca y el siguiente ciclo volveria a notificar a todos los que si recibieron. **Peor que no avisar es avisar de mas.**
+
+#### La llave privada de Firebase
+
+Una variable de entorno no admite saltos de linea reales, asi que `FIREBASE_PRIVATE_KEY` viaja con `\n` escapados y el servicio los restituye al leerla. Sin eso el SDK falla con un error de PEM invalido que no dice nada sobre la causa.
+
+Se pasan los tres campos sueltos —proyecto, correo, llave— y no el JSON completo de la cuenta de servicio, para no tener que versionar ni montar un archivo con credenciales en el servidor.
+
+#### Tokens de dispositivo
+
+`POST /usuarios/me/dispositivos-push` es **idempotente por token**: la app lo reenvia en cada arranque porque el sistema puede rotarlo, y acumular registros mandaria la misma notificacion varias veces al mismo telefono.
+
+Un token que FCM reporta como muerto se da de baja solo. Si no, la tabla acumula destinos que fallan en cada envio y el conteo de "fallidos" deja de significar nada.
+
+`DISPOSITIVO_PUSH` no es `DISPOSITIVO_CONFIABLE`: aquel autentica —permite saltar el segundo factor— y este solo dice a donde entregar un aviso. Por eso vive en `public` y no en `auth`.
+
+---
+
+### Comanda del evento
+
+El documento que dice que se sirve y cuando. Lo sube el capitan y lo consultan los meseros desde el salon.
+
+**Nunca se sirve por URL publica.** El acceso pasa siempre por el backend, que verifica participacion en ese evento. Con un enlace publico, cualquiera que lo consiguiera veria la operacion completa de un evento ajeno — y los enlaces se reenvian por WhatsApp sin pensarlo.
+
+| | |
+|---|---|
+| Formatos | PDF, JPEG, PNG, HEIC, WebP |
+| Maximo | 10 MB |
+| Quien la ve | Capitan del evento, admin, meseros con participacion. **El comensal no** |
+| Reemplazable | Si, conservando la anterior |
+
+#### Por que se aceptan imagenes
+
+Muchos capitanes reciben la comanda por WhatsApp como foto. Exigir PDF los obligaria a convertirla en el telefono, que es justo lo que no van a hacer a las siete de la tarde.
+
+#### La clave lleva UUID, no el nombre del archivo
+
+`comandas/{id_evento}/{uuid}.pdf`. Dos razones: el nombre que pone el capitan puede repetirse entre eventos, y uno adivinable en el bucket haria que la privacidad dependiera solo del ACL.
+
+**La clave no se serializa nunca.** Exponerla permitiria construir peticiones directas al almacenamiento saltandose la verificacion de permisos.
+
+#### Reemplazar no borra
+
+La version anterior queda inactiva pero el objeto se conserva. Si el capitan sube la equivocada a media fiesta, se puede volver con `PATCH /comanda/{id}/restaurar`, que **no re-sube nada**: el archivo sigue ahi y solo cambia cual esta vigente.
+
+Costaria mas un evento servido con la comanda incorrecta que los kilobytes de las versiones viejas.
+
+**Retirar no reactiva la anterior**: eso seria adivinar la intencion del capitan. El evento queda sin comanda hasta que suba otra o restaure una a proposito.
+
+#### URL firmada de 15 minutos
+
+Suficiente para abrir el documento y leerlo, y corto para que un enlace reenviado deje de servir enseguida. Se firma en cada peticion en vez de guardarse: una URL firmada caduca, asi que persistirla seria persistir algo que deja de servir.
+
+Hay ademas `GET /comanda/archivo`, que sirve el binario desde el backend, para clientes que no puedan seguir un enlace externo.
+
+#### `forcePathStyle` es obligatorio con Supabase
+
+Supabase no soporta el estilo de host virtual (`bucket.dominio`) que el SDK de S3 usa por defecto contra AWS. Sin `forcePathStyle: true`, cada peticion falla con un error de DNS que no menciona la causa.
+
+Se usa el SDK de S3 y no el cliente propio de Supabase a proposito: si algun dia se cambia a Spaces, R2 o al S3 real, basta con reemplazar endpoint y credenciales.
+
+---
+
+### Decisiones cerradas con el frontend
+
+| | |
+|---|---|
+| Callback | `/auth/callback` — produccion y local |
+| CORS | `CORS_ORIGIN`, sin barra final |
+| Cookie de refresh | `Secure` condicionado al entorno, `SameSite=Lax` |
+| `emitido_en` | En todas las cargas del canal, inyectado por el puente |
+| Resincronizacion | REST tras reconectar. Responsabilidad del cliente |
+| Reconexion al renovar token | Responsabilidad del cliente |
+| Eventos agregados de dashboard | No, en v1 |
+
+#### Por que `SameSite=Lax` basta
+
+El panel (`sgeb.mediocres.mx`) y el proveedor (`auth.sgeb.mediocres.mx`) comparten dominio registrable, asi que el navegador los trata como **same-site**: `Lax` deja pasar la cookie en el `fetch` de renovacion.
+
+En local pasa lo mismo — `localhost:5173` y `localhost:3333` son same-site porque **las cookies ignoran el puerto**.
+
+Si el panel se mudara a otro dominio registrable, habria que pasar a `SameSite=None`, que exige `Secure` y por tanto HTTPS en todos lados.
+
+#### `Secure` condicionado al entorno
+
+En local el proveedor corre sobre `http` y el navegador descartaria la cookie **sin avisar**: el sintoma seria un SSO-1006 al renovar, que apunta a cualquier lado menos a la causa. Fuera de desarrollo va siempre activo.
+
+#### CORS sin comodin, ni siquiera en desarrollo
+
+Antes era `origin: app.inDev ? true : []`. Con `credentials: true`, un origen comodin permitiria que cualquier pagina abierta en el navegador de quien desarrolla hiciera peticiones autenticadas contra el API usando sus cookies. Un navegador de trabajo tiene decenas de pestanas.
+
+**Sin barra final**: el navegador compara el origen exacto y `https://sgeb.mediocres.mx/` no coincide con `https://sgeb.mediocres.mx`.
+
+#### `emitido_en` lo pone el puente, no los servicios
+
+Asi ningun emisor puede olvidarlo y todas las cargas usan el mismo reloj. Es el mismo argumento por el que el puente es el unico punto que conoce a la vez el dominio y el transporte.
+
+**No es un numero de secuencia, y no hace falta**: las cargas llevan estado completo, no deltas. `mesa:cambio` dice "la mesa 7 quedo ocupada", no "+1 ocupada". Aplicar dos veces el mismo evento es idempotente, y uno viejo que llega tarde solo repone un valor que ya era correcto.
+
+---
+
+### Invitaciones: la unica via de alta de personal
+
+El mesero nunca se registra solo. El capitan invita, y el deeplink del correo es lo unico que permite crear la cuenta — eso evita que cualquiera se de alta y aparezca en las listas de asignacion.
+
+| Ruta | Que hace |
+|---|---|
+| `GET /usuarios/invitaciones` | El capitan ve las suyas, el admin todas |
+| `POST /usuarios/invitaciones` | Emite el deeplink y manda el correo |
+| `DELETE /usuarios/invitaciones/:id` | Revoca y **libera el correo** |
+| `POST /usuarios/invitaciones/:id/reenviar` | Revoca la anterior y emite una nueva |
+
+#### El deeplink se devuelve UNA vez
+
+En la base solo queda el SHA-256 del token, asi que un volcado no permite completar registros ajenos. **El listado nunca lo devuelve**, ni hasheado: quien tenga acceso al panel podria completar el registro de otra persona.
+
+Si el correo no llega, se reenvia —lo que emite un token nuevo—, no se recupera el viejo.
+
+#### Reenviar no reutiliza el token
+
+Si el correo no llego, el token viejo sigue vivo 72 horas. Reemplazarlo cierra esa ventana y reinicia el plazo, que es lo que el capitan espera al reenviar.
+
+#### Revocar libera el correo
+
+El indice parcial `invitacion_una_pendiente_por_correo` solo admite una pendiente por direccion, asi que sin revocar la anterior no se puede reinvitar. Una ya `usada` no se revoca (SSO-3002): la cuenta existe, y para darla de baja se usa `PATCH /usuarios/{uuid}`.
+
+#### `expirada` se deriva, no se persiste
+
+El estado se calcula comparando `expira_en` con la hora actual. Persistirlo exigiria una tarea que recorriera la tabla marcandolas: un proceso mas que mantener para un dato derivable con una comparacion.
+
+---
+
+### Defensas de entrada: tres capas
+
+Cada una cubre lo que las otras no.
+
+| Capa | Que cubre | Que NO cubre |
+|---|---|---|
+| Bloqueo por cuenta (5/10 min) | Fuerza bruta contra un usuario | El ataque distribuido sobre muchas cuentas |
+| Limite por IP (SSO-4009) | El distribuido: 3 contrasenas contra 1000 correos | Botnets con IPs rotativas |
+| reCAPTCHA v3 (SSO-4008) | Automatizacion desde navegador | Peticiones con `curl` desde un servidor |
+
+**El hueco que faltaba era el del medio.** El bloqueo por cuenta no detiene a quien prueba tres contrasenas contra mil correos: eso nunca dispara un bloqueo, porque ninguna cuenta acumula cinco fallos.
+
+#### reCAPTCHA v3, no v2
+
+v2 muestra el desafio de las imagenes. El usuario tipico aqui es un mesero capturando su contrasena en el estacionamiento del salon, con una mano y con prisa: un desafio visual ahi no protege, **expulsa**.
+
+v3 puntua en silencio de 0.0 a 1.0 y deja que el servidor decida. Umbral 0.5: subirlo empieza a tirar usuarios legitimos —extensiones de privacidad, redes compartidas, incognito— y aqui un falso positivo es un mesero que no puede entrar a trabajar.
+
+**Es una senal de riesgo, no un muro.** Sin navegador no hay senal, asi que quien llame con `curl` simplemente omite el token. Por eso el token es **obligatorio** cuando esta activo: si fuera opcional, saltarselo seria tan facil como no enviarlo.
+
+**El error no revela la puntuacion.** Le diria al atacante que tan cerca esta del umbral.
+
+**La accion debe coincidir.** Sin esa comprobacion, un token obtenido en una pagina publica de bajo riesgo serviria para pasar el login.
+
+#### Se falla ABIERTO, a proposito
+
+Si Google no responde o falta la llave, **se deja pasar** y se registra el error.
+
+Fallar cerrado convertiria una caida de un tercero en una caida total del login, y con un evento en curso eso significa meseros que no pueden entrar a trabajar. El riesgo se acota porque las otras dos capas no dependen de Google.
+
+#### El limite por IP vive en la base, no en memoria
+
+Un contador en memoria se pierde al reiniciar y no se comparte entre procesos: bastaria con esperar un despliegue para reiniciar la cuenta. El costo es una escritura por peticion sensible —unas decenas por minuto en el peor caso— y a cambio el limite es real.
+
+Las ventanas son generosas a proposito: `login` permite 20 en 15 minutos. Un humano rara vez pasa de 5, y 20 deja margen para varias personas tras el mismo NAT —el WiFi de un salon— sin abrir la puerta a un ataque, que necesitaria miles.
+
+**Cuenta antes de procesar**, no solo los fallos: contar solo los fallidos dejaria pasar un ataque que acierta de vez en cuando.
+
+`sso:purgar` limpia esta tabla, que es la unica del modulo que recibe una fila por peticion.
+
+> **Nginx debe pasar la IP real** (`X-Forwarded-For`, `X-Real-IP`). Sin eso todo llega con la IP del proxy y el limite bloquea a todo el mundo a la vez.
+
+---
+
 ## Lo que falta
 
-Este proyecto cubre la capa transversal y un módulo de referencia (`salones`). Pendiente, en orden sugerido:
-
-1. **Migraciones y modelos** — 38 tablas. Esquema `auth` separado desde el primer día, sin FK cruzadas.
-2. **Módulo de identidad** — proveedor OAuth 2.1 + PKCE (Entorno v0.4 §8.4). El más largo.
-3. **Módulos de dominio** — eventos → participaciones → menú → órdenes → cierre.
-4. **Cubaitor** — cliente MQTT suscrito al broker del VPS 4.
-5. **Dashboard** — al final: agrega lo que los demás producen.
-6. **Pruebas** — funcionales por endpoint. `@japa/openapi-assertions` permite validar las respuestas contra `openapi-sgeb.yaml` directamente.
+1. **Correo** para códigos 2FA, invitaciones y recuperación. Hoy el código se escribe en el log fuera de producción (`[DEV] Codigo de verificacion: 123456`), que es lo que permite desarrollar sin servidor de correo.
+2. **Endpoint de invitación para el capitán** — el servicio existe y está probado; falta exponerlo con validador y permisos.
+3. **Cliente MQTT** — hoy `procesarDetalle` devuelve las instrucciones (pin, volumen, segundos); falta publicarlas en el broker del VPS 4 y recibir el reporte.
+4. **Dashboard** — al final: agrega lo que los demás producen.
+5. **Gestión de dispositivos y sesiones** desde el perfil del usuario.
 
 ---
 

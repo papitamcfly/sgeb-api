@@ -87,6 +87,25 @@ export default class HttpExceptionHandler extends ExceptionHandler {
       }
     }
 
+    /**
+     * Violación de CHECK. Son reglas de coherencia que la aplicación debería
+     * haber validado antes con su propio código de negocio; llegar hasta aquí
+     * significa que faltó un guardián en el servicio. Se traduce a SGEB-2008
+     * (datos incoherentes) en vez de a un 5001, porque el usuario sí puede
+     * corregir lo que capturó, y el `technical_message` nombra el constraint
+     * para que el equipo sepa qué guardián agregar.
+     */
+    if (e.code === '23514') {
+      return {
+        codigo: 'SGEB-2008' as CodigoSGEB,
+        status: 400,
+        datos: null,
+        tecnico:
+          `CHECK violation: constraint='${e.constraint}', tabla='${e.table}'. ` +
+          `Falta validación en la capa de servicios. Trace-Id: ${traceId}.`,
+      }
+    }
+
     if (e.code === '23503') {
       return {
         codigo: 'SGEB-3002' as CodigoSGEB,

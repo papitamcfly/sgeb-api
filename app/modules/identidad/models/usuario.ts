@@ -6,15 +6,17 @@ import Rol from './rol.js'
 /**
  * USUARIO — tabla del módulo de identidad.
  *
- * Vive en el esquema `auth`, sin llaves foráneas hacia ninguna tabla de dominio
- * y sin que ninguna tabla de dominio la referencie. Ese aislamiento es lo que
- * permite mover el módulo a otra base de datos sin migración.
+ * Vive en `public` porque es la tabla más referenciada del dominio (evento,
+ * participación, merma, datos bancarios). Las tablas del esquema `auth` apuntan
+ * hacia ella, nunca al revés: esa dirección es la que permite desprender el
+ * módulo de identidad sin dejar referencias colgando (Anexo D, Diccionario v3).
  *
  * **Solo IdentidadService importa este modelo.** Si aparece en un servicio de
- * eventos, de órdenes o de pagos, la extracción del SSO deja de ser posible.
+ * eventos, de órdenes o de pagos, la extracción del SSO deja de ser posible:
+ * el dominio debe conocer a los usuarios por UUID a través de la interfaz.
  */
 export default class Usuario extends BaseModel {
-  static table = 'auth.usuario'
+  static table = 'usuario'
 
   /**
    * Identificador interno. Llave de todos los JOIN del módulo.
@@ -23,44 +25,45 @@ export default class Usuario extends BaseModel {
    * nivel de modelo de que el entero no se escapa por un `expand`, una relación
    * anidada o un serializador que alguien escriba distraído.
    */
-  @column({ isPrimary: true, serializeAs: null })
+  @column({ isPrimary: true, columnName: 'id_usuario', serializeAs: null })
   declare id: number
 
   /** Identificador público. Coincide con el claim `sub` del JWT. Inmutable. */
-  @column({ serializeAs: 'uuid_usuario' })
+  @column({ columnName: 'uuid_usuario', serializeAs: 'uuid_usuario' })
   declare uuidUsuario: string
 
-  @column({ serializeAs: null })
+  @column({ columnName: 'id_rol', serializeAs: null })
   declare idRol: number
 
   @column()
   declare nombre: string
 
-  @column({ serializeAs: 'apellido_paterno' })
+  @column({ columnName: 'apellido_paterno', serializeAs: 'apellido_paterno' })
   declare apellidoPaterno: string
 
-  @column({ serializeAs: 'apellido_materno' })
+  @column({ columnName: 'apellido_materno', serializeAs: 'apellido_materno' })
   declare apellidoMaterno: string | null
 
   @column()
   declare correo: string
 
   /** Nunca sale del servidor, en ninguna circunstancia. */
-  @column({ serializeAs: null })
+  @column({ columnName: 'password_hash', serializeAs: null })
   declare passwordHash: string
 
   @column()
   declare telefono: string | null
 
+  @column({ columnName: 'biometria_habilitada', serializeAs: null })
+  declare biometriaHabilitada: boolean
+
   @column()
   declare activo: boolean
 
-  @column.dateTime({ autoCreate: true, serializeAs: 'creado_en' })
+  @column.dateTime({ autoCreate: true, columnName: 'creado_en', serializeAs: 'creado_en' })
   declare creadoEn: DateTime
 
-  @column.dateTime({ autoCreate: true, autoUpdate: true, serializeAs: 'actualizado_en' })
-  declare actualizadoEn: DateTime
 
-  @belongsTo(() => Rol, { foreignKey: 'idRol' })
+  @belongsTo(() => Rol, { foreignKey: 'idRol', localKey: 'id' })
   declare rol: BelongsTo<typeof Rol>
 }

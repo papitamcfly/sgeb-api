@@ -7,55 +7,930 @@
 import { BaseModel, column } from '@adonisjs/lucid/orm'
 import { DateTime } from 'luxon'
 
-export class AuthAccessTokenSchema extends BaseModel {
-  static $columns = [
-    'abilities',
-    'createdAt',
-    'expiresAt',
-    'hash',
-    'id',
-    'lastUsedAt',
-    'name',
-    'tokenableId',
-    'type',
-    'updatedAt',
-  ] as const
-  $columns = AuthAccessTokenSchema.$columns
-  @column()
-  declare abilities: string
-  @column.dateTime({ autoCreate: true })
-  declare createdAt: DateTime | null
+export class AsignacionMesaSchema extends BaseModel {
+  static $columns = ['fechaAsignacion', 'fechaVinculacion', 'idAsignacion', 'idMesa', 'idParticipacion', 'vinculada'] as const
+  $columns = AsignacionMesaSchema.$columns
   @column.dateTime()
-  declare expiresAt: DateTime | null
-  @column()
-  declare hash: string
+  declare fechaAsignacion: DateTime
+  @column.dateTime()
+  declare fechaVinculacion: DateTime | null
   @column({ isPrimary: true })
-  declare id: number
-  @column.dateTime()
-  declare lastUsedAt: DateTime | null
+  declare idAsignacion: number
   @column()
-  declare name: string | null
+  declare idMesa: number
   @column()
-  declare tokenableId: number
+  declare idParticipacion: number
   @column()
-  declare type: string
-  @column.dateTime({ autoCreate: true, autoUpdate: true })
-  declare updatedAt: DateTime | null
+  declare vinculada: boolean
 }
 
-export class UserSchema extends BaseModel {
-  static $columns = ['createdAt', 'email', 'fullName', 'id', 'password', 'updatedAt'] as const
-  $columns = UserSchema.$columns
-  @column.dateTime({ autoCreate: true })
-  declare createdAt: DateTime
+export class BebidaSchema extends BaseModel {
+  static $columns = ['activo', 'alcoholica', 'descripcion', 'idBebida', 'nombre'] as const
+  $columns = BebidaSchema.$columns
   @column()
-  declare email: string
+  declare activo: boolean
   @column()
-  declare fullName: string | null
+  declare alcoholica: boolean
+  @column()
+  declare descripcion: string | null
   @column({ isPrimary: true })
-  declare id: number
-  @column({ serializeAs: null })
-  declare password: string
-  @column.dateTime({ autoCreate: true, autoUpdate: true })
-  declare updatedAt: DateTime | null
+  declare idBebida: number
+  @column()
+  declare nombre: string
+}
+
+export class BloqueoCuentaSchema extends BaseModel {
+  static $columns = ['activo', 'fin', 'idBloqueo', 'idUsuario', 'inicio', 'intentosAcumulados', 'levantadoPor', 'motivo'] as const
+  $columns = BloqueoCuentaSchema.$columns
+  @column()
+  declare activo: boolean
+  @column.dateTime()
+  declare fin: DateTime | null
+  @column({ isPrimary: true })
+  declare idBloqueo: number
+  @column()
+  declare idUsuario: number
+  @column.dateTime()
+  declare inicio: DateTime
+  @column()
+  declare intentosAcumulados: number | null
+  @column()
+  declare levantadoPor: number | null
+  @column()
+  declare motivo: any
+}
+
+export class CalificacionSchema extends BaseModel {
+  static $columns = ['comentario', 'creadaEn', 'idCalificacion', 'idMesa', 'idParticipacion', 'puntuacion', 'tokenComensal'] as const
+  $columns = CalificacionSchema.$columns
+  @column()
+  declare comentario: string | null
+  @column.dateTime()
+  declare creadaEn: DateTime
+  @column({ isPrimary: true })
+  declare idCalificacion: number
+  @column()
+  declare idMesa: number
+  @column()
+  declare idParticipacion: number
+  @column()
+  declare puntuacion: number
+  @column()
+  declare tokenComensal: string
+}
+
+export class ChecklistSchema extends BaseModel {
+  static $columns = ['activo', 'idChecklist', 'nombre', 'tipo'] as const
+  $columns = ChecklistSchema.$columns
+  @column()
+  declare activo: boolean
+  @column({ isPrimary: true })
+  declare idChecklist: number
+  @column()
+  declare nombre: string
+  @column()
+  declare tipo: any
+}
+
+export class ChecklistInstanciaSchema extends BaseModel {
+  static $columns = ['completado', 'fecha', 'idChecklist', 'idInstancia', 'idParticipacion'] as const
+  $columns = ChecklistInstanciaSchema.$columns
+  @column()
+  declare completado: boolean
+  @column.dateTime()
+  declare fecha: DateTime
+  @column()
+  declare idChecklist: number
+  @column({ isPrimary: true })
+  declare idInstancia: number
+  @column()
+  declare idParticipacion: number
+}
+
+export class ChecklistItemSchema extends BaseModel {
+  static $columns = ['activo', 'cantidadEsperada', 'descripcion', 'idChecklist', 'idItem', 'orden'] as const
+  $columns = ChecklistItemSchema.$columns
+  @column()
+  declare activo: boolean
+  @column()
+  declare cantidadEsperada: number
+  @column()
+  declare descripcion: string
+  @column()
+  declare idChecklist: number
+  @column({ isPrimary: true })
+  declare idItem: number
+  @column()
+  declare orden: number
+}
+
+export class ChecklistRespuestaSchema extends BaseModel {
+  static $columns = ['cantidad', 'hecho', 'idInstancia', 'idItem', 'idRespuesta'] as const
+  $columns = ChecklistRespuestaSchema.$columns
+  @column()
+  declare cantidad: number
+  @column()
+  declare hecho: boolean
+  @column()
+  declare idInstancia: number
+  @column()
+  declare idItem: number
+  @column({ isPrimary: true })
+  declare idRespuesta: number
+}
+
+export class CodigoAutorizacionSchema extends BaseModel {
+  static $columns = ['clientId', 'codeChallenge', 'codigoHash', 'creadoEn', 'expiraEn', 'idCodigoAutorizacion', 'idUsuario', 'nonce', 'redirectUri', 'scope', 'usado', 'usadoEn'] as const
+  $columns = CodigoAutorizacionSchema.$columns
+  @column()
+  declare clientId: string
+  @column()
+  declare codeChallenge: string
+  @column()
+  declare codigoHash: string
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column.dateTime()
+  declare expiraEn: DateTime
+  @column({ isPrimary: true })
+  declare idCodigoAutorizacion: number
+  @column()
+  declare idUsuario: number
+  @column()
+  declare nonce: string
+  @column()
+  declare redirectUri: string
+  @column()
+  declare scope: string
+  @column()
+  declare usado: boolean
+  @column.dateTime()
+  declare usadoEn: DateTime | null
+}
+
+export class CodigoVerificacionSchema extends BaseModel {
+  static $columns = ['canal', 'codigoHash', 'creadoEn', 'expiraEn', 'idCodigo', 'idUsuario', 'intentosFallidos', 'proposito', 'reenvios', 'usado'] as const
+  $columns = CodigoVerificacionSchema.$columns
+  @column()
+  declare canal: any
+  @column()
+  declare codigoHash: string
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column.dateTime()
+  declare expiraEn: DateTime
+  @column({ isPrimary: true })
+  declare idCodigo: number
+  @column()
+  declare idUsuario: number
+  @column()
+  declare intentosFallidos: number
+  @column()
+  declare proposito: any
+  @column()
+  declare reenvios: number
+  @column()
+  declare usado: boolean
+}
+
+export class ComandaEventoSchema extends BaseModel {
+  static $columns = ['activo', 'claveObjeto', 'creadoEn', 'idComanda', 'idEvento', 'idSubidoPor', 'nombreOriginal', 'tamanoBytes', 'tipoMime'] as const
+  $columns = ComandaEventoSchema.$columns
+  @column()
+  declare activo: boolean
+  @column()
+  declare claveObjeto: string
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column({ isPrimary: true })
+  declare idComanda: number
+  @column()
+  declare idEvento: number
+  @column()
+  declare idSubidoPor: number
+  @column()
+  declare nombreOriginal: string
+  @column()
+  declare tamanoBytes: number
+  @column()
+  declare tipoMime: string
+}
+
+export class ConfigDispensadoSchema extends BaseModel {
+  static $columns = ['activo', 'caudalMlSeg', 'idConfig', 'idCubaitor', 'idEvento', 'idInsumo', 'pinGpio', 'ultimaCalibracion', 'volumenCargadoMl', 'volumenDisponibleMl'] as const
+  $columns = ConfigDispensadoSchema.$columns
+  @column()
+  declare activo: boolean
+  @column()
+  declare caudalMlSeg: string
+  @column({ isPrimary: true })
+  declare idConfig: number
+  @column()
+  declare idCubaitor: number
+  @column()
+  declare idEvento: number
+  @column()
+  declare idInsumo: number
+  @column()
+  declare pinGpio: number
+  @column.dateTime()
+  declare ultimaCalibracion: DateTime | null
+  @column()
+  declare volumenCargadoMl: number
+  @column()
+  declare volumenDisponibleMl: number
+}
+
+export class ConfirmacionLlegadaSchema extends BaseModel {
+  static $columns = ['biometricoVerificado', 'dentroGeocerca', 'distanciaM', 'idConfirmacion', 'idParticipacion', 'latitud', 'longitud', 'metodo', 'resultado', 'timestamp'] as const
+  $columns = ConfirmacionLlegadaSchema.$columns
+  @column()
+  declare biometricoVerificado: boolean
+  @column()
+  declare dentroGeocerca: boolean
+  @column()
+  declare distanciaM: string
+  @column({ isPrimary: true })
+  declare idConfirmacion: number
+  @column()
+  declare idParticipacion: number
+  @column()
+  declare latitud: string
+  @column()
+  declare longitud: string
+  @column()
+  declare metodo: any
+  @column()
+  declare resultado: any
+  @column.dateTime()
+  declare timestamp: DateTime
+}
+
+export class CronogramaEventoSchema extends BaseModel {
+  static $columns = ['descripcion', 'disparado', 'fechaDisparo', 'horaObjetivo', 'idCronograma', 'idEvento', 'tipoTiempo'] as const
+  $columns = CronogramaEventoSchema.$columns
+  @column()
+  declare descripcion: string | null
+  @column()
+  declare disparado: boolean
+  @column.dateTime()
+  declare fechaDisparo: DateTime | null
+  @column()
+  declare horaObjetivo: string
+  @column({ isPrimary: true })
+  declare idCronograma: number
+  @column()
+  declare idEvento: number
+  @column()
+  declare tipoTiempo: any
+}
+
+export class CubaitorSchema extends BaseModel {
+  static $columns = ['estado', 'hostIp', 'idCubaitor', 'mac', 'nombre', 'numPins', 'ultimaConexion'] as const
+  $columns = CubaitorSchema.$columns
+  @column()
+  declare estado: any
+  @column()
+  declare hostIp: string | null
+  @column({ isPrimary: true })
+  declare idCubaitor: number
+  @column()
+  declare mac: string
+  @column()
+  declare nombre: string
+  @column()
+  declare numPins: number
+  @column.dateTime()
+  declare ultimaConexion: DateTime | null
+}
+
+export class DatosBancarioSchema extends BaseModel {
+  static $columns = ['activo', 'banco', 'clabe', 'idDatos', 'idUsuario', 'titularCuenta'] as const
+  $columns = DatosBancarioSchema.$columns
+  @column()
+  declare activo: boolean
+  @column()
+  declare banco: string
+  @column()
+  declare clabe: string
+  @column({ isPrimary: true })
+  declare idDatos: number
+  @column()
+  declare idUsuario: number
+  @column()
+  declare titularCuenta: string
+}
+
+export class DispensadoSchema extends BaseModel {
+  static $columns = ['estado', 'idConfig', 'idDetalle', 'idDispensado', 'segundosCalculado', 'segundosReal', 'timestamp', 'volumenRealEstimadoMl', 'volumenSolicitadoMl'] as const
+  $columns = DispensadoSchema.$columns
+  @column()
+  declare estado: any
+  @column()
+  declare idConfig: number
+  @column()
+  declare idDetalle: number
+  @column({ isPrimary: true })
+  declare idDispensado: number
+  @column()
+  declare segundosCalculado: string
+  @column()
+  declare segundosReal: string | null
+  @column.dateTime()
+  declare timestamp: DateTime
+  @column()
+  declare volumenRealEstimadoMl: number | null
+  @column()
+  declare volumenSolicitadoMl: number
+}
+
+export class DispositivoConfiableSchema extends BaseModel {
+  static $columns = ['activo', 'creadoEn', 'expiraEn', 'idDispositivo', 'idUsuario', 'nombreDispositivo', 'plataforma', 'tokenHash', 'ultimoUso', 'userAgent'] as const
+  $columns = DispositivoConfiableSchema.$columns
+  @column()
+  declare activo: boolean
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column.dateTime()
+  declare expiraEn: DateTime
+  @column({ isPrimary: true })
+  declare idDispositivo: number
+  @column()
+  declare idUsuario: number
+  @column()
+  declare nombreDispositivo: string | null
+  @column()
+  declare plataforma: any
+  @column()
+  declare tokenHash: string
+  @column.dateTime()
+  declare ultimoUso: DateTime | null
+  @column()
+  declare userAgent: string | null
+}
+
+export class DispositivoPushSchema extends BaseModel {
+  static $columns = ['activo', 'actualizadoEn', 'creadoEn', 'idDispositivoPush', 'idUsuario', 'plataforma', 'token'] as const
+  $columns = DispositivoPushSchema.$columns
+  @column()
+  declare activo: boolean
+  @column.dateTime()
+  declare actualizadoEn: DateTime
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column({ isPrimary: true })
+  declare idDispositivoPush: number
+  @column()
+  declare idUsuario: number
+  @column()
+  declare plataforma: any
+  @column()
+  declare token: string
+}
+
+export class EnvaseSchema extends BaseModel {
+  static $columns = ['activo', 'idEnvase', 'nombre', 'volumenMl'] as const
+  $columns = EnvaseSchema.$columns
+  @column()
+  declare activo: boolean
+  @column({ isPrimary: true })
+  declare idEnvase: number
+  @column()
+  declare nombre: string
+  @column()
+  declare volumenMl: number
+}
+
+export class EventoSchema extends BaseModel {
+  static $columns = ['comandaUrl', 'creadoEn', 'cupoMeseros', 'estado', 'fecha', 'fin', 'horaPresentacion', 'idCapitan', 'idEvento', 'idSalon', 'idUsuarioCreador', 'inicio', 'numMesas', 'radioGeocercaM', 'tarifaPorMesero', 'tipo', 'titulo'] as const
+  $columns = EventoSchema.$columns
+  @column()
+  declare comandaUrl: string | null
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column()
+  declare cupoMeseros: number
+  @column()
+  declare estado: any
+  @column.date()
+  declare fecha: DateTime
+  @column.dateTime()
+  declare fin: DateTime | null
+  @column()
+  declare horaPresentacion: string
+  @column()
+  declare idCapitan: number
+  @column({ isPrimary: true })
+  declare idEvento: number
+  @column()
+  declare idSalon: number
+  @column()
+  declare idUsuarioCreador: number
+  @column.dateTime()
+  declare inicio: DateTime
+  @column()
+  declare numMesas: number
+  @column()
+  declare radioGeocercaM: number
+  @column()
+  declare tarifaPorMesero: string
+  @column()
+  declare tipo: any
+  @column()
+  declare titulo: string
+}
+
+export class FlujoAutorizacionSchema extends BaseModel {
+  static $columns = ['clientId', 'codeChallenge', 'consumido', 'creadoEn', 'expiraEn', 'idFlujo', 'idUsuarioPendiente', 'nonce', 'redirectUri', 'scope', 'state', 'ticketHash'] as const
+  $columns = FlujoAutorizacionSchema.$columns
+  @column()
+  declare clientId: string
+  @column()
+  declare codeChallenge: string
+  @column()
+  declare consumido: boolean
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column.dateTime()
+  declare expiraEn: DateTime
+  @column({ isPrimary: true })
+  declare idFlujo: number
+  @column()
+  declare idUsuarioPendiente: number | null
+  @column()
+  declare nonce: string
+  @column()
+  declare redirectUri: string
+  @column()
+  declare scope: string
+  @column()
+  declare state: string
+  @column()
+  declare ticketHash: string
+}
+
+export class InsumoSchema extends BaseModel {
+  static $columns = ['activo', 'costo', 'estado', 'idInsumo', 'nombre', 'tipo', 'unidad'] as const
+  $columns = InsumoSchema.$columns
+  @column()
+  declare activo: boolean
+  @column()
+  declare costo: string
+  @column()
+  declare estado: any
+  @column({ isPrimary: true })
+  declare idInsumo: number
+  @column()
+  declare nombre: string
+  @column()
+  declare tipo: any
+  @column()
+  declare unidad: string
+}
+
+export class IntentoLoginSchema extends BaseModel {
+  static $columns = ['codigoError', 'correoCapturado', 'exitoso', 'idIntento', 'idUsuario', 'ip', 'metodo', 'motivoFallo', 'timestamp', 'userAgent'] as const
+  $columns = IntentoLoginSchema.$columns
+  @column()
+  declare codigoError: string | null
+  @column()
+  declare correoCapturado: string
+  @column()
+  declare exitoso: boolean
+  @column({ isPrimary: true })
+  declare idIntento: number
+  @column()
+  declare idUsuario: number | null
+  @column()
+  declare ip: string | null
+  @column()
+  declare metodo: any
+  @column()
+  declare motivoFallo: any | null
+  @column.dateTime()
+  declare timestamp: DateTime
+  @column()
+  declare userAgent: string | null
+}
+
+export class InvitacionSchema extends BaseModel {
+  static $columns = ['apellidoMaterno', 'apellidoPaterno', 'correo', 'creadoEn', 'estado', 'expiraEn', 'idEmisor', 'idInvitacion', 'idRolDestino', 'idUsuarioCreado', 'nombre', 'tokenHash', 'usadaEn'] as const
+  $columns = InvitacionSchema.$columns
+  @column()
+  declare apellidoMaterno: string | null
+  @column()
+  declare apellidoPaterno: string
+  @column()
+  declare correo: string
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column()
+  declare estado: any
+  @column.dateTime()
+  declare expiraEn: DateTime
+  @column()
+  declare idEmisor: number
+  @column({ isPrimary: true })
+  declare idInvitacion: number
+  @column()
+  declare idRolDestino: number
+  @column()
+  declare idUsuarioCreado: number | null
+  @column()
+  declare nombre: string
+  @column()
+  declare tokenHash: string
+  @column.dateTime()
+  declare usadaEn: DateTime | null
+}
+
+export class LlaveFirmaSchema extends BaseModel {
+  static $columns = ['algoritmo', 'creadoEn', 'estado', 'idLlave', 'kid', 'llavePrivadaCifrada', 'llavePublica', 'retiradaEn'] as const
+  $columns = LlaveFirmaSchema.$columns
+  @column()
+  declare algoritmo: any
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column()
+  declare estado: any
+  @column({ isPrimary: true })
+  declare idLlave: number
+  @column()
+  declare kid: string
+  @column()
+  declare llavePrivadaCifrada: string
+  @column()
+  declare llavePublica: string
+  @column.dateTime()
+  declare retiradaEn: DateTime | null
+}
+
+export class MermaDetalleSchema extends BaseModel {
+  static $columns = ['cantidad', 'costoEstimado', 'descripcion', 'idMermaDet', 'idReporte', 'tipo'] as const
+  $columns = MermaDetalleSchema.$columns
+  @column()
+  declare cantidad: number
+  @column()
+  declare costoEstimado: string | null
+  @column()
+  declare descripcion: string | null
+  @column({ isPrimary: true })
+  declare idMermaDet: number
+  @column()
+  declare idReporte: number
+  @column()
+  declare tipo: any
+}
+
+export class MesaSchema extends BaseModel {
+  static $columns = ['codigoQr', 'estado', 'etiqueta', 'idEvento', 'idMesa', 'nfcUid'] as const
+  $columns = MesaSchema.$columns
+  @column()
+  declare codigoQr: string
+  @column()
+  declare estado: any
+  @column()
+  declare etiqueta: string
+  @column()
+  declare idEvento: number
+  @column({ isPrimary: true })
+  declare idMesa: number
+  @column()
+  declare nfcUid: string | null
+}
+
+export class MovimientoBitacoraSchema extends BaseModel {
+  static $columns = ['accion', 'detalle', 'idBitacora', 'idEntidad', 'ip', 'timestamp', 'tipoEntidad', 'uuidUsuarioResponsable'] as const
+  $columns = MovimientoBitacoraSchema.$columns
+  @column()
+  declare accion: any
+  @column()
+  declare detalle: string | null
+  @column({ isPrimary: true })
+  declare idBitacora: number
+  @column()
+  declare idEntidad: number | null
+  @column()
+  declare ip: string | null
+  @column.dateTime()
+  declare timestamp: DateTime
+  @column()
+  declare tipoEntidad: string
+  @column()
+  declare uuidUsuarioResponsable: string | null
+}
+
+export class NotificacionSchema extends BaseModel {
+  static $columns = ['canal', 'enviadaEn', 'idCronograma', 'idEvento', 'idNotificacion', 'idParticipacion', 'idSolicitud', 'leida', 'mensaje', 'tipo'] as const
+  $columns = NotificacionSchema.$columns
+  @column()
+  declare canal: any
+  @column.dateTime()
+  declare enviadaEn: DateTime
+  @column()
+  declare idCronograma: number | null
+  @column()
+  declare idEvento: number
+  @column({ isPrimary: true })
+  declare idNotificacion: number
+  @column()
+  declare idParticipacion: number | null
+  @column()
+  declare idSolicitud: number | null
+  @column()
+  declare leida: boolean
+  @column()
+  declare mensaje: string
+  @column()
+  declare tipo: any
+}
+
+export class OrdenSchema extends BaseModel {
+  static $columns = ['creadaEn', 'entregadaEn', 'estado', 'idMesa', 'idOrden', 'idParticipacion'] as const
+  $columns = OrdenSchema.$columns
+  @column.dateTime()
+  declare creadaEn: DateTime
+  @column.dateTime()
+  declare entregadaEn: DateTime | null
+  @column()
+  declare estado: any
+  @column()
+  declare idMesa: number
+  @column({ isPrimary: true })
+  declare idOrden: number
+  @column()
+  declare idParticipacion: number
+}
+
+export class OrdenDetalleSchema extends BaseModel {
+  static $columns = ['cantidad', 'estado', 'idBebida', 'idDetalle', 'idEnvase', 'idOrden', 'volumenTotalMl'] as const
+  $columns = OrdenDetalleSchema.$columns
+  @column()
+  declare cantidad: number
+  @column()
+  declare estado: any
+  @column()
+  declare idBebida: number
+  @column({ isPrimary: true })
+  declare idDetalle: number
+  @column()
+  declare idEnvase: number
+  @column()
+  declare idOrden: number
+  @column()
+  declare volumenTotalMl: number
+}
+
+export class PagoSchema extends BaseModel {
+  static $columns = ['clabeDestino', 'estado', 'fechaPago', 'idPago', 'idParticipacion', 'monto', 'referencia'] as const
+  $columns = PagoSchema.$columns
+  @column()
+  declare clabeDestino: string
+  @column()
+  declare estado: any
+  @column.dateTime()
+  declare fechaPago: DateTime | null
+  @column({ isPrimary: true })
+  declare idPago: number
+  @column()
+  declare idParticipacion: number
+  @column()
+  declare monto: string
+  @column()
+  declare referencia: string | null
+}
+
+export class ParticipacionEventoSchema extends BaseModel {
+  static $columns = ['checklistOk', 'estado', 'fechaAparto', 'fechaConfirmaAsistencia', 'fechaLlegada', 'fechaSalida', 'fechaSeleccion', 'idEvento', 'idParticipacion', 'idUsuario', 'puesto'] as const
+  $columns = ParticipacionEventoSchema.$columns
+  @column()
+  declare checklistOk: boolean
+  @column()
+  declare estado: any
+  @column.dateTime()
+  declare fechaAparto: DateTime | null
+  @column.dateTime()
+  declare fechaConfirmaAsistencia: DateTime | null
+  @column.dateTime()
+  declare fechaLlegada: DateTime | null
+  @column.dateTime()
+  declare fechaSalida: DateTime | null
+  @column.dateTime()
+  declare fechaSeleccion: DateTime | null
+  @column()
+  declare idEvento: number
+  @column({ isPrimary: true })
+  declare idParticipacion: number
+  @column()
+  declare idUsuario: number
+  @column()
+  declare puesto: any
+}
+
+export class PeticionIpSchema extends BaseModel {
+  static $columns = ['accion', 'creadoEn', 'idPeticion', 'ip'] as const
+  $columns = PeticionIpSchema.$columns
+  @column()
+  declare accion: string
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column({ isPrimary: true })
+  declare idPeticion: number
+  @column()
+  declare ip: string
+}
+
+export class RecetaIngredienteSchema extends BaseModel {
+  static $columns = ['idBebida', 'idInsumo', 'idRecetaIng', 'ordenServido', 'tipoPorcion', 'valor'] as const
+  $columns = RecetaIngredienteSchema.$columns
+  @column()
+  declare idBebida: number
+  @column()
+  declare idInsumo: number
+  @column({ isPrimary: true })
+  declare idRecetaIng: number
+  @column()
+  declare ordenServido: number
+  @column()
+  declare tipoPorcion: any
+  @column()
+  declare valor: string
+}
+
+export class RefreshTokenSchema extends BaseModel {
+  static $columns = ['cliente', 'creadoEn', 'expiraEn', 'idDispositivo', 'idPadre', 'idRefresh', 'idUsuario', 'ip', 'metodoLogin', 'revocado', 'tokenHash', 'ultimoUso', 'userAgent'] as const
+  $columns = RefreshTokenSchema.$columns
+  @column()
+  declare cliente: any
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column.dateTime()
+  declare expiraEn: DateTime
+  @column()
+  declare idDispositivo: number | null
+  @column()
+  declare idPadre: number | null
+  @column({ isPrimary: true })
+  declare idRefresh: number
+  @column()
+  declare idUsuario: number
+  @column()
+  declare ip: string | null
+  @column()
+  declare metodoLogin: any
+  @column()
+  declare revocado: boolean
+  @column()
+  declare tokenHash: string
+  @column.dateTime()
+  declare ultimoUso: DateTime | null
+  @column()
+  declare userAgent: string | null
+}
+
+export class ReporteMermaSchema extends BaseModel {
+  static $columns = ['fecha', 'idEvento', 'idGeneradoPor', 'idReporte', 'observaciones'] as const
+  $columns = ReporteMermaSchema.$columns
+  @column.dateTime()
+  declare fecha: DateTime
+  @column()
+  declare idEvento: number
+  @column()
+  declare idGeneradoPor: number
+  @column({ isPrimary: true })
+  declare idReporte: number
+  @column()
+  declare observaciones: string | null
+}
+
+export class RolSchema extends BaseModel {
+  static $columns = ['activo', 'descripcion', 'idRol', 'nombre'] as const
+  $columns = RolSchema.$columns
+  @column()
+  declare activo: boolean
+  @column()
+  declare descripcion: string | null
+  @column({ isPrimary: true })
+  declare idRol: number
+  @column()
+  declare nombre: any
+}
+
+export class SalonSchema extends BaseModel {
+  static $columns = ['activo', 'calle', 'capacidadMaxMesas', 'capacidadPersonas', 'ciudad', 'colonia', 'cp', 'estado', 'idSalon', 'latitud', 'longitud', 'nombre'] as const
+  $columns = SalonSchema.$columns
+  @column()
+  declare activo: boolean
+  @column()
+  declare calle: string
+  @column()
+  declare capacidadMaxMesas: number
+  @column()
+  declare capacidadPersonas: number
+  @column()
+  declare ciudad: string
+  @column()
+  declare colonia: string
+  @column()
+  declare cp: string
+  @column()
+  declare estado: string
+  @column({ isPrimary: true })
+  declare idSalon: number
+  @column()
+  declare latitud: string
+  @column()
+  declare longitud: string
+  @column()
+  declare nombre: string
+}
+
+export class SesionSsoSchema extends BaseModel {
+  static $columns = ['cookieHash', 'creadoEn', 'expiraEn', 'idSesion', 'idUsuario', 'metodoLogin', 'revocada', 'sid'] as const
+  $columns = SesionSsoSchema.$columns
+  @column()
+  declare cookieHash: string
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column.dateTime()
+  declare expiraEn: DateTime
+  @column({ isPrimary: true })
+  declare idSesion: number
+  @column()
+  declare idUsuario: number
+  @column()
+  declare metodoLogin: any
+  @column()
+  declare revocada: boolean
+  @column()
+  declare sid: string
+}
+
+export class SolicitudServicioSchema extends BaseModel {
+  static $columns = ['atendidaEn', 'creadaEn', 'estado', 'idMesa', 'idParticipacion', 'idSolicitud', 'tipo'] as const
+  $columns = SolicitudServicioSchema.$columns
+  @column.dateTime()
+  declare atendidaEn: DateTime | null
+  @column.dateTime()
+  declare creadaEn: DateTime
+  @column()
+  declare estado: any
+  @column()
+  declare idMesa: number
+  @column()
+  declare idParticipacion: number | null
+  @column({ isPrimary: true })
+  declare idSolicitud: number
+  @column()
+  declare tipo: any
+}
+
+export class TokenRecuperacionSchema extends BaseModel {
+  static $columns = ['creadoEn', 'expiraEn', 'idToken', 'idUsuario', 'ipSolicitud', 'tokenHash', 'usado', 'usadoEn'] as const
+  $columns = TokenRecuperacionSchema.$columns
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column.dateTime()
+  declare expiraEn: DateTime
+  @column({ isPrimary: true })
+  declare idToken: number
+  @column()
+  declare idUsuario: number
+  @column()
+  declare ipSolicitud: string | null
+  @column()
+  declare tokenHash: string
+  @column()
+  declare usado: boolean
+  @column.dateTime()
+  declare usadoEn: DateTime | null
+}
+
+export class UsuarioSchema extends BaseModel {
+  static $columns = ['activo', 'apellidoMaterno', 'apellidoPaterno', 'biometriaHabilitada', 'correo', 'creadoEn', 'idRol', 'idUsuario', 'nombre', 'passwordHash', 'telefono', 'uuidUsuario'] as const
+  $columns = UsuarioSchema.$columns
+  @column()
+  declare activo: boolean
+  @column()
+  declare apellidoMaterno: string | null
+  @column()
+  declare apellidoPaterno: string
+  @column()
+  declare biometriaHabilitada: boolean
+  @column()
+  declare correo: string
+  @column.dateTime()
+  declare creadoEn: DateTime
+  @column()
+  declare idRol: number
+  @column({ isPrimary: true })
+  declare idUsuario: number
+  @column()
+  declare nombre: string
+  @column()
+  declare passwordHash: string
+  @column()
+  declare telefono: string | null
+  @column()
+  declare uuidUsuario: string
 }
