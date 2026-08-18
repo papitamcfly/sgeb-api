@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import db from '@adonisjs/lucid/services/db'
+import app from '@adonisjs/core/services/app'
 import type { HttpContext } from '@adonisjs/core/http'
 
 /**
@@ -65,7 +66,15 @@ export class SesionSsoService {
 
     ctx.response.cookie(NOMBRE_COOKIE, secreto, {
       httpOnly: true,
-      secure: true,
+      /**
+       * `Secure` fuera de desarrollo. En local el proveedor corre sobre `http`
+       * y el navegador descartaría la cookie sin avisar: el F5 llegaría a
+       * `/authorize?...&prompt=none` sin `sso_session` y el proveedor
+       * respondería "sesión expirada" aunque la sesión siga viva.
+       *
+       * Mismo criterio que `sgeb_refresh` en protocolo_controller.ts.
+       */
+      secure: !app.inDev,
       sameSite: 'lax',
       path: '/',
       maxAge: VIGENCIA_HORAS * 60 * 60,
