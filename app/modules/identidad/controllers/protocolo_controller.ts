@@ -224,10 +224,9 @@ export default class ProtocoloController {
     }
   }
 
-  async userinfo({ request, response }: HttpContext) {
+  async userinfo({ response, sujeto }: HttpContext) {
     // El middleware de validación ya dejó el sujeto en el contexto.
-    const uuid = request.header('x-sujeto-uuid')
-    const usuario = await Usuario.query().where('uuid_usuario', uuid ?? '').preload('rol').first()
+    const usuario = await Usuario.query().where('uuid_usuario', sujeto.uuid).preload('rol').first()
 
     if (!usuario) {
       return response.status(401).json({ error: 'invalid_grant', sso_code: 'SSO-1003' })

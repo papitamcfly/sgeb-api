@@ -28,7 +28,9 @@ router.get('/.well-known/openid-configuration', '#modules/identidad/controllers/
 router.get('/.well-known/jwks.json', '#modules/identidad/controllers/protocolo_controller.jwks')
 router.get('/authorize', '#modules/identidad/controllers/protocolo_controller.authorize')
 router.post('/token', '#modules/identidad/controllers/protocolo_controller.token')
-router.get('/userinfo', '#modules/identidad/controllers/protocolo_controller.userinfo')
+router
+  .get('/userinfo', '#modules/identidad/controllers/protocolo_controller.userinfo')
+  .use([middleware.auth()])
 router.get('/logout', '#modules/identidad/controllers/protocolo_controller.logout')
 router.post('/token/revoke', '#modules/identidad/controllers/protocolo_controller.revocar')
 
