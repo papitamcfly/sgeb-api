@@ -75,7 +75,7 @@ export class RecuperacionService {
     const base = env.get('APP_URL_PROVEEDOR') ?? 'https://auth.sgeb.mediocres.mx'
     await this.correo.recuperacion(
       normalizado,
-      `${base}/interno/recuperar/nueva?token=${encodeURIComponent(token)}`
+      `${base}/recuperar/nueva?token=${encodeURIComponent(token)}`
     )
 
     return token

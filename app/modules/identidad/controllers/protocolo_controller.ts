@@ -10,6 +10,7 @@ import { SesionSsoService } from '#modules/identidad/services/sesion_sso_service
 import * as P from '#modules/identidad/pantallas'
 import { LimitePeticionesService } from '#shared/services/limite_peticiones_service'
 import Usuario from '#modules/identidad/models/usuario'
+import crypto from 'node:crypto'
 
 /**
  * Endpoints de PROTOCOLO — OAuth 2.1 + OpenID Connect.
