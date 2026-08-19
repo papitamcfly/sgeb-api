@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon'
 import { BaseModel, belongsTo, column, hasMany } from '@adonisjs/lucid/orm'
+import Usuario from '#modules/identidad/models/usuario'
 import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
 import Salon from './salon.js'
 import Mesa from './mesa.js'
@@ -76,6 +77,16 @@ export default class Evento extends BaseModel {
 
   @column.dateTime({ autoCreate: true, columnName: 'creado_en', serializeAs: 'creado_en' })
   declare creadoEn: DateTime
+
+  /**
+   * El capitán, precargado al leer el evento.
+   *
+   * `id_capitan` no sale del backend, así que sin esta relación el contrato
+   * prometía `uuid_capitan` y la respuesta no lo traía: el panel no podía saber
+   * quién dirige el evento.
+   */
+  @belongsTo(() => Usuario, { foreignKey: 'idCapitan', localKey: 'id' })
+  declare capitan: BelongsTo<typeof Usuario>
 
   @belongsTo(() => Salon, { foreignKey: 'idSalon', localKey: 'id' })
   declare salon: BelongsTo<typeof Salon>

@@ -1,5 +1,8 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column } from '@adonisjs/lucid/orm'
+import { BaseModel, belongsTo, column } from '@adonisjs/lucid/orm'
+import type { BelongsTo } from '@adonisjs/lucid/types/relations'
+import Mesa from '#modules/eventos/models/mesa'
+import ParticipacionEvento from '#modules/participaciones/models/participacion_evento'
 
 export default class AsignacionMesa extends BaseModel {
   static table = 'asignacion_mesa'
@@ -26,4 +29,15 @@ export default class AsignacionMesa extends BaseModel {
 
   @column.dateTime({ columnName: 'fecha_vinculacion', serializeAs: 'fecha_vinculacion' })
   declare fechaVinculacion: DateTime | null
+
+  /**
+   * Mesa y participación se precargan en el readback del panel de piso: la
+   * fila sola solo tiene enteros, y el capitán necesita ver qué etiqueta de
+   * mesa tiene qué mesero.
+   */
+  @belongsTo(() => Mesa, { foreignKey: 'idMesa', localKey: 'id' })
+  declare mesa: BelongsTo<typeof Mesa>
+
+  @belongsTo(() => ParticipacionEvento, { foreignKey: 'idParticipacion', localKey: 'id' })
+  declare participacion: BelongsTo<typeof ParticipacionEvento>
 }

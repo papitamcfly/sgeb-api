@@ -196,6 +196,8 @@ router
         router.get('/eventos', '#modules/eventos/controllers/eventos_controller.listar')
         router.get('/eventos/:id_evento', '#modules/eventos/controllers/eventos_controller.mostrar')
         router.get('/eventos/:id_evento/participaciones', '#modules/participaciones/controllers/participaciones_controller.listar')
+        /** Readback del panel de piso: qué mesa tiene quién. */
+        router.get('/eventos/:id_evento/asignaciones', '#modules/participaciones/controllers/participaciones_controller.listarAsignaciones')
 
         /**
          * El menú lo consultan los tres roles: el mesero lo necesita para
