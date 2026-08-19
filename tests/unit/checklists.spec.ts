@@ -300,6 +300,33 @@ test.group('Checklists', (group) => {
     )
   })
 
+  test('el readback de asignaciones resuelve mesa y mesero', async ({ assert }) => {
+    const { checklists, participacion, part, mesa, evento } = await escenario()
+    const c = await checklists.crear({ nombre: 'Montaje', tipo: 'montaje', items: ITEMS_MONTAJE })
+    const inst = await checklists.instanciar(participacion.id, c.id)
+    const items = await db.from('checklist_item').where('id_checklist', c.id).orderBy('orden')
+    await checklists.responder(
+      inst.id,
+      items.map((i) => ({ idItem: i.id_item, cantidad: i.cantidad_esperada, hecho: true }))
+    )
+    await checklists.aprobar(inst.id)
+    await part.asignarMesa(participacion.id, mesa.id)
+
+    /**
+     * Sin esto el panel de piso sabía asignar y vincular, pero no reconstruir su
+     * estado tras una recarga.
+     */
+    const filas = await part.listarAsignaciones(evento.id)
+    assert.lengthOf(filas, 1)
+    assert.equal(filas[0].mesa.etiqueta, 'Mesa 1')
+    assert.equal(filas[0].participacion.usuario.uuidUsuario, UUID_MESERO)
+    assert.isFalse(filas[0].vinculada)
+
+    await part.vincularMesa(filas[0].id, mesa.codigoQr)
+    const vinculadas = await part.listarAsignaciones(evento.id, { vinculada: true })
+    assert.lengthOf(vinculadas, 1)
+  })
+
   test('desmarcar un ítem antes de aprobar vuelve la instancia a incompleta', async ({ assert }) => {
     const { checklists, participacion } = await escenario()
     const c = await checklists.crear({ nombre: 'Montaje', tipo: 'montaje', items: ITEMS_MONTAJE })

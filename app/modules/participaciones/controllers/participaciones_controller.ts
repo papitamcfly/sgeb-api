@@ -60,6 +60,20 @@ export default class ParticipacionesController {
     return responder.creado(ctx, r)
   }
 
+  /**
+   * Readback del panel de piso: qué mesa tiene quién, en todo el evento.
+   *
+   * Sin esto el panel sabía asignar y vincular pero no reconstruir su estado
+   * tras una recarga.
+   */
+  async listarAsignaciones(ctx: HttpContext) {
+    const v = ctx.request.input('vinculada')
+    const filas = await this.servicio.listarAsignaciones(ctx.request.param('id_evento'), {
+      vinculada: v === undefined ? undefined : v === 'true',
+    })
+    return responder.lista(ctx, filas)
+  }
+
   async asignarMesa(ctx: HttpContext) {
     const { idMesa } = await asignarMesaValidator.validate(ctx.request.body())
     const a = await this.servicio.asignarMesa(ctx.request.param('id_participacion'), idMesa)

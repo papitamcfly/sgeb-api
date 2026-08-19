@@ -62,6 +62,32 @@ export class ParticipacionService {
     return q.orderBy('id_participacion')
   }
 
+  /**
+   * Asignaciones del evento, con mesa y mesero resueltos.
+   *
+   * Existe porque sin ella el panel de piso no puede reconstruir su estado tras
+   * una recarga: sabía asignar y vincular, pero no leer qué mesa tiene quién.
+   * Se resuelve por evento y no por participación porque el capitán mira el
+   * salón completo, no a un mesero a la vez.
+   */
+  async listarAsignaciones(idEvento: number, filtros: { vinculada?: boolean } = {}) {
+    const q = AsignacionMesa.query()
+      .whereIn(
+        'id_participacion',
+        db.from('participacion_evento').select('id_participacion').where('id_evento', idEvento)
+      )
+      .preload('mesa')
+      .preload('participacion', (p) =>
+        p.preload('usuario', (u) =>
+          u.select('uuid_usuario', 'nombre', 'apellido_paterno', 'apellido_materno')
+        )
+      )
+      .orderBy('id_asignacion')
+
+    if (filtros.vinculada !== undefined) q.where('vinculada', filtros.vinculada)
+    return q
+  }
+
   async obtener(id: number): Promise<ParticipacionEvento> {
     const p = await ParticipacionEvento.query()
       .where('id_participacion', id)

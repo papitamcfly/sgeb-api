@@ -142,6 +142,42 @@ test.group('Reglas del evento', (group) => {
     )
   })
 
+  test('SGEB-2008: la presentación debe ser anterior al inicio', async ({ assert }) => {
+    const s = await servicio()
+    const sa = await salon()
+
+    /**
+     * Es la hora a la que el mesero llega a montar, y el montaje toma tiempo.
+     * Iguales significaría que llega cuando los invitados ya están entrando.
+     */
+    assert.equal(
+      await codigo(() => s.crear(datosEvento(sa.id, { horaPresentacion: '19:00' }), UUID_CAP)),
+      'SGEB-2008'
+    )
+    assert.equal(
+      await codigo(() => s.crear(datosEvento(sa.id, { horaPresentacion: '21:00' }), UUID_CAP)),
+      'SGEB-2008'
+    )
+
+    /** Anterior sí, sin exigir una anticipación mínima concreta. */
+    const e = await s.crear(datosEvento(sa.id, { horaPresentacion: '18:59' }), UUID_CAP)
+    assert.equal(e.horaPresentacion, '18:59')
+  })
+
+  test('el evento expone al capitán por UUID, nunca por entero', async ({ assert }) => {
+    const s = await servicio()
+    const sa = await salon()
+    const creado = await s.crear(datosEvento(sa.id), UUID_CAP)
+
+    const e = await s.obtener(creado.id)
+    const json = e.serialize()
+
+    /** El contrato promete `uuid_capitan`; sin la relación no llegaba nada. */
+    assert.property(json, 'capitan')
+    assert.equal((json.capitan as Record<string, string>).uuid_usuario, UUID_CAP)
+    assert.notProperty(json, 'id_capitan')
+  })
+
   test('SGEB-4023: el capitán debe tener el rol adecuado', async ({ assert }) => {
     const s = await servicio()
     await usuario(UUID_MESERO, 3, 'mesero@x.mx')

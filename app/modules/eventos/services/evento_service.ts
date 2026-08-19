@@ -60,7 +60,10 @@ export class EventoService {
     fechaHasta?: string
     uuidCapitan?: string
   }) {
-    const q = Evento.query().preload('salon').orderBy('fecha', 'desc')
+    const q = Evento.query()
+      .preload('salon')
+      .preload('capitan', (u) => u.select('uuid_usuario', 'nombre', 'apellido_paterno', 'apellido_materno', 'correo'))
+      .orderBy('fecha', 'desc')
 
     if (filtros.estado) q.where('estado', filtros.estado)
     if (filtros.fechaDesde) q.where('fecha', '>=', filtros.fechaDesde)
@@ -81,7 +84,11 @@ export class EventoService {
   }
 
   async obtener(id: number): Promise<Evento> {
-    const evento = await Evento.query().where('id_evento', id).preload('salon').first()
+    const evento = await Evento.query()
+      .where('id_evento', id)
+      .preload('salon')
+      .preload('capitan', (u) => u.select('uuid_usuario', 'nombre', 'apellido_paterno', 'apellido_materno', 'correo'))
+      .first()
     if (!evento) throw errores.noEncontrado('EVENTO', id)
     return evento
   }
@@ -495,6 +502,28 @@ export class EventoService {
     if (inicio.toISODate() !== fecha.toISODate()) {
       throw new SgebError('SGEB-2008', {
         tecnico: `inicio='${d.inicio}' no coincide con fecha='${d.fecha}'.`,
+      })
+    }
+
+    /**
+     * `hora_presentacion` debe ser **estrictamente anterior** a `inicio`.
+     *
+     * Es la hora a la que el mesero se presenta a montar; el montaje toma
+     * tiempo. Iguales significaría que llega cuando los invitados ya están
+     * entrando, y posterior no describe nada real.
+     *
+     * No se exige una anticipación mínima concreta: un coctel de dos horas y un
+     * banquete de doce necesitan montajes muy distintos, y fijar un número aquí
+     * obligaría al capitán a pelearse con el sistema en el caso que no previmos.
+     */
+    const [hh, mm] = d.horaPresentacion.split(':').map(Number)
+    const presentacion = fecha.set({ hour: hh, minute: mm, second: 0, millisecond: 0 })
+
+    if (presentacion >= inicio) {
+      throw new SgebError('SGEB-2008', {
+        tecnico:
+          `hora_presentacion='${d.horaPresentacion}' >= inicio='${d.inicio}'. ` +
+          `El mesero se presenta a montar ANTES de que empiece el evento.`,
       })
     }
   }
