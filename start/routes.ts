@@ -73,7 +73,7 @@ router
     // Solo `auth` + `sujeto`: cualquier rol autenticado puede operar sobre sí mismo.
     router
       .group(() => {
-        router.get('/usuarios/me', '#modules/identidad/controllers/perfil_controller.mostrar')
+        router.get('/usuarios/me', '#modules/identidad/controllers/usuarios_controller.miPerfil')
       })
       .use([middleware.auth(), middleware.sujeto()])
 

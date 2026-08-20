@@ -70,7 +70,18 @@ export class ParticipacionService {
    * Se resuelve por evento y no por participación porque el capitán mira el
    * salón completo, no a un mesero a la vez.
    */
-  async listarAsignaciones(idEvento: number, filtros: { vinculada?: boolean } = {}) {
+  async listarAsignaciones(
+    idEvento: number,
+    filtros: { vinculada?: boolean; activa?: boolean } = {}
+  ) {
+    /**
+     * Se comprueba que el evento exista. Sin esto, un id inventado y un evento
+     * real sin asignaciones respondían lo mismo —`200 []`— y el panel no podía
+     * distinguir "todavía no hay nada" de "esta pantalla no existe".
+     */
+    const existe = await db.from('evento').where('id_evento', idEvento).first()
+    if (!existe) throw errores.noEncontrado('EVENTO', idEvento)
+
     const q = AsignacionMesa.query()
       .whereIn(
         'id_participacion',
@@ -85,6 +96,13 @@ export class ParticipacionService {
       .orderBy('id_asignacion')
 
     if (filtros.vinculada !== undefined) q.where('vinculada', filtros.vinculada)
+
+    /**
+     * Por defecto solo las **vigentes**: el panel de piso quiere el estado
+     * actual, no el histórico de mesas que alguien tuvo y soltó. Con
+     * `activa=false` se consulta el histórico explícitamente.
+     */
+    q.where('activa', filtros.activa ?? true)
     return q
   }
 
@@ -315,14 +333,45 @@ export class ParticipacionService {
    * el mesero vincula escaneando el QR ya parado frente a la mesa. Una mesa
    * asignada pero no vinculada significa que el mesero aún no llegó a ella.
    */
+  /**
+   * El capitán asigna una mesa al mesero.
+   *
+   * Guards, en el orden en que importan:
+   *  1. El evento admite operación (ni finalizado ni cancelado)
+   *  2. El mesero ya llegó al salón — asignar a quien no ha confirmado llegada
+   *     produce un plano de piso que no describe la realidad
+   *  3. El checklist está aprobado (SGEB-4005)
+   *  4. La mesa es de este evento
+   *  5. La mesa no tiene otra asignación **vigente**
+   */
   async asignarMesa(idParticipacion: number, idMesa: number): Promise<AsignacionMesa> {
-    return db.transaction(async (trx) => {
+    const r = await db.transaction(async (trx) => {
       const p = await ParticipacionEvento.query({ client: trx })
         .where('id_participacion', idParticipacion)
         .forUpdate()
         .first()
 
       if (!p) throw errores.noEncontrado('PARTICIPACION_EVENTO', idParticipacion)
+
+      const ev = await Evento.findOrFail(p.idEvento, { client: trx })
+      if (['finalizado', 'cancelado'].includes(ev.estado)) {
+        throw new SgebError('SGEB-4013', {
+          tecnico: `EVENTO id=${ev.id} estado='${ev.estado}'. No admite asignaciones.`,
+        })
+      }
+
+      /**
+       * Estado mínimo. Antes solo se miraba el checklist, así que se podía
+       * asignar mesa a alguien que ni siquiera había confirmado asistencia.
+       */
+      const PERMITIDOS = ['confirmo_llegada', 'asignado', 'vinculo']
+      if (!PERMITIDOS.includes(p.estado)) {
+        throw new SgebError('SGEB-4011', {
+          tecnico:
+            `PARTICIPACION id=${idParticipacion} estado='${p.estado}'. ` +
+            `Asignar mesa exige uno de: ${PERMITIDOS.join(', ')}.`,
+        })
+      }
 
       if (!p.checklistOk) {
         throw new SgebError('SGEB-4005', {
@@ -341,21 +390,33 @@ export class ParticipacionService {
         })
       }
 
+      /**
+       * Se mira `activa`, no `vinculada`. Antes solo se rechazaba si había una
+       * ya vinculada, así que dos meseros podían tener la misma mesa asignada
+       * mientras ninguno hubiera llegado a ella.
+       */
       const vigente = await AsignacionMesa.query({ client: trx })
         .where('id_mesa', idMesa)
-        .where('vinculada', true)
+        .where('activa', true)
         .first()
 
       if (vigente) {
         throw new SgebError('SGEB-4006', {
           tecnico:
-            `MESA id=${idMesa} con ASIGNACION_MESA activa id=${vigente.id} ` +
-            `para participacion=${vigente.idParticipacion}.`,
+            `MESA id=${idMesa} con ASIGNACION_MESA vigente id=${vigente.id} ` +
+            `para participacion=${vigente.idParticipacion} (vinculada=${vigente.vinculada}).`,
         })
       }
 
       const asignacion = await AsignacionMesa.create(
-        { idParticipacion, idMesa, vinculada: false, fechaAsignacion: DateTime.now() },
+        {
+          idParticipacion,
+          idMesa,
+          vinculada: false,
+          activa: true,
+          fechaAsignacion: DateTime.now(),
+          fechaLiberacion: null,
+        },
         { client: trx }
       )
 
@@ -364,8 +425,27 @@ export class ParticipacionService {
         await p.useTransaction(trx).save()
       }
 
-      return asignacion
+      return { asignacion, idEvento: p.idEvento, idParticipacion: p.id, estado: p.estado }
     })
+
+    /**
+     * Emitido FUERA de la transacción, como el resto de la familia. Faltaba:
+     * el panel de otro capitán no se enteraba de la asignación hasta recargar.
+     */
+    emitter.emit('mesa:cambio', {
+      idEvento: r.idEvento,
+      idMesa,
+      estado: 'libre',
+      idParticipacion: r.idParticipacion,
+      vinculada: false,
+    })
+    emitter.emit('participacion:cambio', {
+      idEvento: r.idEvento,
+      idParticipacion: r.idParticipacion,
+      estado: r.estado,
+    })
+
+    return r.asignacion
   }
 
   /**
@@ -375,7 +455,20 @@ export class ParticipacionService {
    * el código está impreso en la mesa, así que vincular implica haber estado
    * ahí.
    */
-  async vincularMesa(idAsignacion: number, codigoQr: string): Promise<AsignacionMesa> {
+  /**
+   * El mesero vincula su mesa escaneando el QR.
+   *
+   * `uuidMesero` es obligatorio: sin él, cualquier mesero con un QR podía
+   * vincular la asignación de otro y aparecer como responsable de una mesa que
+   * no le tocaba. El QR está impreso en la mesa, a la vista de todos.
+   */
+  async vincularMesa(
+    idAsignacion: number,
+    codigoQr: string,
+    uuidMesero: string
+  ): Promise<AsignacionMesa> {
+    const usuario = await this.identidad.resolverPorUuid(uuidMesero)
+
     return db.transaction(async (trx) => {
       const a = await AsignacionMesa.query({ client: trx })
         .where('id_asignacion', idAsignacion)
@@ -383,6 +476,21 @@ export class ParticipacionService {
         .first()
 
       if (!a) throw errores.noEncontrado('ASIGNACION_MESA', idAsignacion)
+
+      if (!a.activa) {
+        throw new SgebError('SGEB-4011', {
+          tecnico: `ASIGNACION_MESA id=${idAsignacion} liberada el ${a.fechaLiberacion?.toISO()}.`,
+        })
+      }
+
+      const duena = await ParticipacionEvento.findOrFail(a.idParticipacion, { client: trx })
+      if (duena.idUsuario !== usuario.id) {
+        throw new SgebError('SGEB-1004', {
+          tecnico:
+            `sub=${uuidMesero} intentó vincular la ASIGNACION_MESA id=${idAsignacion}, ` +
+            `que pertenece a la participación ${a.idParticipacion} de otro mesero.`,
+        })
+      }
 
       const mesa = await Mesa.findOrFail(a.idMesa, { client: trx })
 
@@ -459,12 +567,49 @@ export class ParticipacionService {
         })
       }
 
+      /**
+       * `activa = false` y no solo `vinculada = false`: son cosas distintas y
+       * confundirlas hacía que una asignación liberada se viera igual que una
+       * recién creada.
+       */
       a.vinculada = false
+      a.activa = false
+      a.fechaLiberacion = DateTime.now()
       await a.useTransaction(trx).save()
 
       await trx.from('mesa').where('id_mesa', a.idMesa).update({ estado: 'libre' })
       const mesa = await Mesa.findOrFail(a.idMesa, { client: trx })
-      return { idEvento: mesa.idEvento, idMesa: mesa.id }
+
+      /**
+       * Revertir el estado de la participación. Sin esto el mesero se quedaba
+       * en `asignado` o `vinculo` sin mesa: el panel lo mostraba trabajando en
+       * una mesa que ya no tenía, y la máquina de estados quedaba mintiendo.
+       *
+       * Vuelve a `confirmo_llegada`, que es el estado real: llegó al salón y
+       * está disponible para otra mesa.
+       */
+      const p = await ParticipacionEvento.query({ client: trx })
+        .where('id_participacion', a.idParticipacion)
+        .forUpdate()
+        .firstOrFail()
+
+      let estadoParticipacion = p.estado
+      if (['asignado', 'vinculo'].includes(p.estado)) {
+        const otras = await AsignacionMesa.query({ client: trx })
+          .where('id_participacion', a.idParticipacion)
+          .where('activa', true)
+          .whereNot('id_asignacion', a.id)
+          .first()
+
+        /** Solo si no le queda ninguna otra mesa vigente. */
+        if (!otras) {
+          p.estado = 'confirmo_llegada'
+          await p.useTransaction(trx).save()
+          estadoParticipacion = p.estado
+        }
+      }
+
+      return { idEvento: mesa.idEvento, idMesa: mesa.id, idParticipacion: p.id, estadoParticipacion }
     }).then((r) => {
       emitter.emit('mesa:cambio', {
         idEvento: r.idEvento,
@@ -472,6 +617,11 @@ export class ParticipacionService {
         estado: 'libre',
         idParticipacion: null,
         vinculada: false,
+      })
+      emitter.emit('participacion:cambio', {
+        idEvento: r.idEvento,
+        idParticipacion: r.idParticipacion,
+        estado: r.estadoParticipacion,
       })
     })
   }

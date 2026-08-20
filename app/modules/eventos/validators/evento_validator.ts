@@ -65,5 +65,7 @@ export const filtrosEventoValidator = vine.compile(
     fechaDesde: vine.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     fechaHasta: vine.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     uuidCapitan: vine.string().trim().regex(UUID_V4).optional(),
+    /** Documentado en el contrato desde la v1.0; faltaba implementarlo. */
+    idSalon: vine.number().min(1).optional(),
   })
 )

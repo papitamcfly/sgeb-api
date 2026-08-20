@@ -31,6 +31,23 @@ export default class AsignacionMesa extends BaseModel {
   declare fechaVinculacion: DateTime | null
 
   /**
+   * Vigencia de la asignación, **ortogonal a `vinculada`**.
+   *
+   * Antes `vinculada = false` significaba a la vez "recién asignada" y "ya
+   * liberada", y eran indistinguibles: el panel seguía mostrando al mesero con
+   * mesa después de quitársela.
+   *
+   *   activa=true,  vinculada=false → asignada, el mesero no ha llegado
+   *   activa=true,  vinculada=true  → el mesero está en la mesa
+   *   activa=false                  → liberada
+   */
+  @column()
+  declare activa: boolean
+
+  @column.dateTime({ columnName: 'fecha_liberacion', serializeAs: 'fecha_liberacion' })
+  declare fechaLiberacion: DateTime | null
+
+  /**
    * Mesa y participación se precargan en el readback del panel de piso: la
    * fila sola solo tiene enteros, y el capitán necesita ver qué etiqueta de
    * mesa tiene qué mesero.
