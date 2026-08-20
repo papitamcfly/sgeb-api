@@ -297,18 +297,36 @@ export class OrdenService {
         await orden.useTransaction(trx).save()
       }
 
+      // IMPORTAMOS EL SERVICIO MQTT
+      const { mqttService } = await import('#shared/services/mqtt_service')
+
+      const instruccionesResponse = dispensados.map((d, i) => ({
+        id_dispensado: d.id,
+        pin_gpio: planes[i].config.pinGpio,
+        volumen_ml: planes[i].ml,
+        segundos: planes[i].segundos,
+      }))
+
+      // Publicar vía MQTT agolpando por Cubaitor
+      const mcsPorConfig: Record<number, string> = {}
+      for (let i = 0; i < planes.length; i++) {
+        const idCubaitor = planes[i].config.idCubaitor
+        if (!mcsPorConfig[idCubaitor]) {
+          const c = await trx.from('cubaitor').where('id_cubaitor', idCubaitor).first()
+          mcsPorConfig[idCubaitor] = c.mac // Aquí c.mac seguramente es "barra1"
+        }
+        
+        // Publicar la instrucción a la MAC correspondiente
+        mqttService.publicarInstrucciones(mcsPorConfig[idCubaitor], [instruccionesResponse[i]])
+      }
+
       return {
         id_detalle: detalle.id,
         idEvento: mesa.idEvento,
         idOrden: orden.id,
         idMesa: orden.idMesa,
         estadoOrden: orden.estado,
-        instrucciones: dispensados.map((d, i) => ({
-          id_dispensado: d.id,
-          pin_gpio: planes[i].config.pinGpio,
-          volumen_ml: planes[i].ml,
-          segundos: planes[i].segundos,
-        })),
+        instrucciones: instruccionesResponse,
       }
       })
     } finally {
