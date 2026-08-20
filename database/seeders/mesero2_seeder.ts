@@ -6,7 +6,7 @@ import hash from '@adonisjs/core/services/hash'
 export default class extends BaseSeeder {
   async run() {
     console.log('Creando usuario de prueba directo...')
-    const u = await Usuario.create({
+    await Usuario.create({
       uuidUsuario: randomUUID(),
       idRol: 3, // mesero
       nombre: 'Prueba',
