@@ -328,7 +328,7 @@ test.group('Dashboard', (group) => {
     assert.equal(r.eventos[0].siguiente_accion, 'Completa el checklist de montaje')
 
     await db.from('participacion_evento').where('id_participacion', participacion.id)
-      .update({ checklist_ok: true })
+      .update({ checklist_ok: true, estado: 'confirmo_llegada' })
     r = await dashboard.meseros(UUID_MESERO)
     assert.equal(r.eventos[0].siguiente_accion, 'Espera la asignación de tu mesa')
 

@@ -393,7 +393,7 @@ test.group('API de participaciones', (group) => {
 
     const p = await client.post(`/v1/eventos/${evento.id}/participaciones`).bearerToken(tMesero)
     const idP = p.body().data.id_participacion
-    await db.from('participacion_evento').where('id_participacion', idP).update({ checklist_ok: true })
+    await db.from('participacion_evento').where('id_participacion', idP).update({ checklist_ok: true, estado: 'confirmo_llegada' })
 
     const a = await client
       .post(`/v1/participaciones/${idP}/asignaciones`)

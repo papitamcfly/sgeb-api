@@ -260,11 +260,24 @@ test.group('Canal de tiempo real', (group) => {
     await unirse(s, evento.id)
 
     const p = await part.apartar(evento.id, UUID_MESERO)
-    await db.from('participacion_evento').where('id_participacion', p.id).update({ checklist_ok: true })
+    await db.from('participacion_evento').where('id_participacion', p.id).update({ checklist_ok: true, estado: 'confirmo_llegada' })
+
+    /**
+     * Asignar TAMBIÉN anuncia. Antes no emitía nada, así que el panel de otro
+     * capitán no se enteraba de la asignación hasta recargar; lo reportó el
+     * equipo de frontend reproduciéndolo con dos pestañas.
+     */
+    const esperaAsignar = esperar<{ idMesa: number; estado: string; vinculada: boolean }>(s, 'mesa:cambio')
     const a = await part.asignarMesa(p.id, mesa.id)
+    const alAsignar = await esperaAsignar
+
+    assert.equal(alAsignar.idMesa, mesa.id)
+    assert.isFalse(alAsignar.vinculada)
+    /** Sigue `libre`: nadie ha llegado físicamente a la mesa todavía. */
+    assert.equal(alAsignar.estado, 'libre')
 
     const espera = esperar<{ idMesa: number; estado: string; vinculada: boolean }>(s, 'mesa:cambio')
-    await part.vincularMesa(a.id, mesa.codigoQr)
+    await part.vincularMesa(a.id, mesa.codigoQr, UUID_MESERO)
     const carga = await espera
 
     assert.equal(carga.idMesa, mesa.id)

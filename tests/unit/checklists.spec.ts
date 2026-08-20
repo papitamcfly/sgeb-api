@@ -322,7 +322,7 @@ test.group('Checklists', (group) => {
     assert.equal(filas[0].participacion.usuario.uuidUsuario, UUID_MESERO)
     assert.isFalse(filas[0].vinculada)
 
-    await part.vincularMesa(filas[0].id, mesa.codigoQr)
+    await part.vincularMesa(filas[0].id, mesa.codigoQr, UUID_MESERO)
     const vinculadas = await part.listarAsignaciones(evento.id, { vinculada: true })
     assert.lengthOf(vinculadas, 1)
   })

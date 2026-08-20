@@ -344,15 +344,16 @@ test.group('Ciclo de vida del mesero', (group) => {
     const mesa = await db.from('mesa').where('id_evento', evento.id).firstOrFail()
 
     const p1 = await part.apartar(evento.id, UUID_MESERO)
-    await db.from('participacion_evento').where('id_participacion', p1.id).update({ checklist_ok: true })
+    await db.from('participacion_evento').where('id_participacion', p1.id).update({ checklist_ok: true, estado: 'confirmo_llegada' })
 
     const otro = 'bb2a9c14-8b7e-4d61-9a03-2c5e77b1d842'
     await usuario(otro, 3, 'otro@x.mx')
     const p2 = await part.apartar(evento.id, otro)
-    await db.from('participacion_evento').where('id_participacion', p2.id).update({ checklist_ok: true })
+    await db.from('participacion_evento').where('id_participacion', p2.id).update({ checklist_ok: true, estado: 'confirmo_llegada' })
 
     const a = await part.asignarMesa(p1.id, mesa.id_mesa)
-    await part.vincularMesa(a.id, (await db.from('mesa').where('id_mesa', mesa.id_mesa).firstOrFail()).codigo_qr)
+    const qr = (await db.from('mesa').where('id_mesa', mesa.id_mesa).firstOrFail()).codigo_qr
+    await part.vincularMesa(a.id, qr, UUID_MESERO)
 
     assert.equal(await codigo(() => part.asignarMesa(p2.id, mesa.id_mesa)), 'SGEB-4006')
   })
@@ -363,16 +364,16 @@ test.group('Ciclo de vida del mesero', (group) => {
     const mesa2 = await eventos.agregarMesa(evento.id, { etiqueta: 'Mesa 2' })
 
     const p = await part.apartar(evento.id, UUID_MESERO)
-    await db.from('participacion_evento').where('id_participacion', p.id).update({ checklist_ok: true })
+    await db.from('participacion_evento').where('id_participacion', p.id).update({ checklist_ok: true, estado: 'confirmo_llegada' })
     const a = await part.asignarMesa(p.id, mesa1.id_mesa)
 
     /**
      * El código está impreso en la mesa, así que vincular implica haber estado
      * ahí. Aceptar el QR de otra mesa rompería esa evidencia.
      */
-    assert.equal(await codigo(() => part.vincularMesa(a.id, mesa2.codigoQr)), 'SGEB-3003')
+    assert.equal(await codigo(() => part.vincularMesa(a.id, mesa2.codigoQr, UUID_MESERO)), 'SGEB-3003')
 
-    const ok = await part.vincularMesa(a.id, mesa1.codigo_qr)
+    const ok = await part.vincularMesa(a.id, mesa1.codigo_qr, UUID_MESERO)
     assert.isTrue(ok.vinculada)
 
     const estado = await db.from('mesa').where('id_mesa', mesa1.id_mesa).firstOrFail()

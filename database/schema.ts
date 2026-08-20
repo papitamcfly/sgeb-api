@@ -8,10 +8,14 @@ import { BaseModel, column } from '@adonisjs/lucid/orm'
 import { DateTime } from 'luxon'
 
 export class AsignacionMesaSchema extends BaseModel {
-  static $columns = ['fechaAsignacion', 'fechaVinculacion', 'idAsignacion', 'idMesa', 'idParticipacion', 'vinculada'] as const
+  static $columns = ['activa', 'fechaAsignacion', 'fechaLiberacion', 'fechaVinculacion', 'idAsignacion', 'idMesa', 'idParticipacion', 'vinculada'] as const
   $columns = AsignacionMesaSchema.$columns
+  @column()
+  declare activa: boolean
   @column.dateTime()
   declare fechaAsignacion: DateTime
+  @column.dateTime()
+  declare fechaLiberacion: DateTime | null
   @column.dateTime()
   declare fechaVinculacion: DateTime | null
   @column({ isPrimary: true })

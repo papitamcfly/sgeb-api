@@ -58,12 +58,12 @@ test.group('Comensal', (group) => {
     const part = await app.container.make(ParticipacionService)
     const p = await part.apartar(e.id, UUID_MESERO)
     const p2 = await part.apartar(e.id, UUID_MESERO2)
-    await db.from('participacion_evento').whereIn('id_participacion', [p.id, p2.id]).update({ checklist_ok: true })
+    await db.from('participacion_evento').whereIn('id_participacion', [p.id, p2.id]).update({ checklist_ok: true, estado: 'confirmo_llegada' })
 
     let asignacion = null
     if (vincular) {
       asignacion = await part.asignarMesa(p.id, mesa.id)
-      await part.vincularMesa(asignacion.id, mesa.codigoQr)
+      await part.vincularMesa(asignacion.id, mesa.codigoQr, UUID_MESERO)
     }
 
     await eventos.cambiarEstado(e.id, 'en_curso')

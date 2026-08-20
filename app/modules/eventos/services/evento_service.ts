@@ -59,6 +59,7 @@ export class EventoService {
     fechaDesde?: string
     fechaHasta?: string
     uuidCapitan?: string
+    idSalon?: number
   }) {
     const q = Evento.query()
       .preload('salon')
@@ -68,6 +69,7 @@ export class EventoService {
     if (filtros.estado) q.where('estado', filtros.estado)
     if (filtros.fechaDesde) q.where('fecha', '>=', filtros.fechaDesde)
     if (filtros.fechaHasta) q.where('fecha', '<=', filtros.fechaHasta)
+    if (filtros.idSalon) q.where('id_salon', filtros.idSalon)
 
     if (filtros.uuidCapitan) {
       const cap = await this.identidad.resolverPorUuid(filtros.uuidCapitan)
@@ -219,8 +221,8 @@ export class EventoService {
 
       evento.estado = nuevo
       await evento.useTransaction(trx).save()
-      return evento
-    })
+      return evento.id
+    }).then((id) => this.obtener(id))
   }
 
   async actualizar(id: number, datos: Partial<CrearEvento>): Promise<Evento> {
@@ -303,13 +305,40 @@ export class EventoService {
       })
     }
 
-    return Mesa.create({
-      idEvento,
-      etiqueta: datos.etiqueta.trim(),
-      codigoQr: randomUUID(),
-      nfcUid: datos.nfcUid ?? null,
-      estado: 'libre',
-    })
+    /**
+     * El INSERT va en su propia transacción para poder capturar la violación
+     * de UNIQUE sin abortar nada más: PostgreSQL invalida la transacción
+     * completa al primer error, así que atrapar el 23505 dentro de una mayor
+     * dejaría la transacción muerta aunque el `catch` maneje el caso.
+     *
+     * Sin esto, dos mesas con la misma etiqueta respondían **500**: la
+     * restricción de la base funcionaba, pero el error escapaba sin traducir.
+     */
+    try {
+      return await db.transaction(async (trx) =>
+        Mesa.create(
+          {
+            idEvento,
+            etiqueta: datos.etiqueta.trim(),
+            codigoQr: randomUUID(),
+            nfcUid: datos.nfcUid ?? null,
+            estado: 'libre',
+          },
+          { client: trx }
+        )
+      )
+    } catch (error) {
+      const e = error as { code?: string; constraint?: string }
+      if (e.code === '23505' && (e.constraint ?? '').includes('etiqueta')) {
+        throw new SgebError('SGEB-2013', {
+          tecnico:
+            `MESA.etiqueta='${datos.etiqueta.trim()}' ya existe en el evento ${idEvento}. ` +
+            `Restricción: ${e.constraint}.`,
+          causa: error,
+        })
+      }
+      throw error
+    }
   }
 
   async listarMesas(idEvento: number) {

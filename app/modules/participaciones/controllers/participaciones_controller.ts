@@ -68,8 +68,10 @@ export default class ParticipacionesController {
    */
   async listarAsignaciones(ctx: HttpContext) {
     const v = ctx.request.input('vinculada')
+    const a = ctx.request.input('activa')
     const filas = await this.servicio.listarAsignaciones(ctx.request.param('id_evento'), {
       vinculada: v === undefined ? undefined : v === 'true',
+      activa: a === undefined ? undefined : a === 'true',
     })
     return responder.lista(ctx, filas)
   }
@@ -82,7 +84,11 @@ export default class ParticipacionesController {
 
   async vincularMesa(ctx: HttpContext) {
     const { codigoQr } = await vincularValidator.validate(ctx.request.body())
-    const a = await this.servicio.vincularMesa(ctx.request.param('id_asignacion'), codigoQr)
+    const a = await this.servicio.vincularMesa(
+      ctx.request.param('id_asignacion'),
+      codigoQr,
+      ctx.sujeto.uuid
+    )
     return responder.ok(ctx, a)
   }
 
