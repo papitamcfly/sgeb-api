@@ -162,6 +162,9 @@ router
         router.get('/eventos/:id_evento/comanda/historial', '#modules/eventos/controllers/comanda_controller.historial')
         router.patch('/eventos/:id_evento/comanda/:id_comanda/restaurar', '#modules/eventos/controllers/comanda_controller.restaurar')
 
+        /** Desempeño histórico del personal. Solo capitán y admin. */
+        router.get('/reportes/desempeno-meseros', '#modules/dashboard/controllers/reportes_controller.desempenoMeseros')
+
         // ── Dashboard del capitán ─────────────────────────────────────
         router.get('/dashboard/capitan', '#modules/dashboard/controllers/dashboard_controller.capitan')
 
@@ -229,6 +232,12 @@ router
         router.get('/salones/:id_salon/disponibilidad', '#modules/eventos/controllers/salones_controller.disponibilidad')
 
         router.get('/cubaitors/:id_cubaitor', '#modules/cubaitor/controllers/cubaitor_controller.mostrar')
+        /**
+         * Latido del dispositivo. Expuesto por HTTP mientras el cliente MQTT no
+         * existe: sin él, `ultima_conexion` nunca se actualizaba y el dashboard
+         * marcaba todos los Cubaitores fuera de línea para siempre.
+         */
+        router.post('/cubaitors/heartbeat', '#modules/cubaitor/controllers/cubaitor_controller.heartbeat')
         router.get('/eventos/:id_evento/alertas', '#modules/cubaitor/controllers/cubaitor_controller.alertas')
 
         /** Paneles: el del evento lo miran los tres roles desde el salón. */

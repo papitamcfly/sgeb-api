@@ -28,7 +28,10 @@ export default class DashboardController {
       .map((s: string) => s.trim())
       .filter(Boolean)
 
-    const r = await this.dashboard.evento(ctx.request.param('id_evento'), secciones)
+    const r = await this.dashboard.evento(ctx.request.param('id_evento'), secciones, {
+      uuid: ctx.sujeto.uuid,
+      rol: ctx.sujeto.rol,
+    })
 
     if (r.fallidas.length > 0) {
       return responder.parcial(ctx, r.data, r.fallidas)

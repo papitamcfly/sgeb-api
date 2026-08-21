@@ -77,10 +77,11 @@ export default class ComensalController {
 
   async cambiarEstado(ctx: HttpContext) {
     const { estado } = await estadoSolicitudValidator.validate(ctx.request.body())
+    /** El sujeto sale del token: el cliente no declara quién atendió. */
     const s = await this.comensal.cambiarEstado(
       ctx.request.param('id_solicitud'),
       estado,
-      ctx.request.input('id_participacion')
+      ctx.sujeto.uuid
     )
     return responder.ok(ctx, s)
   }

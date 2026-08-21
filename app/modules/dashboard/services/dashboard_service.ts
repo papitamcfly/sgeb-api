@@ -3,7 +3,7 @@ import db from '@adonisjs/lucid/services/db'
 import logger from '@adonisjs/core/services/logger'
 import { inject } from '@adonisjs/core'
 import Evento from '#modules/eventos/models/evento'
-import { errores } from '#shared/errors/sgeb_error'
+import { SgebError, errores } from '#shared/errors/sgeb_error'
 import { IdentidadService } from '#modules/identidad/identidad_service'
 
 /**
@@ -149,9 +149,52 @@ export class DashboardService {
    * capitán en el salón refresca "barra" y "servicio" cada pocos segundos y no
    * tiene por qué recalcular el cierre cada vez.
    */
-  async evento(idEvento: number, secciones?: string[]) {
+  /**
+   * Verifica que quien pregunta tenga algo que ver con el evento.
+   *
+   * Faltaba: cualquier usuario autenticado que adivinara un id veía el panel
+   * completo de un evento ajeno —plantilla, órdenes, calificaciones, alertas—.
+   * Los ids son enteros secuenciales, así que adivinarlos es contar.
+   *
+   * Misma regla que la comanda: admin cualquiera, capitán los que dirige,
+   * mesero donde tiene participación.
+   */
+  private async verificarAcceso(idEvento: number, uuidUsuario: string, rol: string): Promise<void> {
+    if (rol === 'admin') return
+
+    const usuario = await this.identidad.resolverPorUuid(uuidUsuario)
+
+    if (rol === 'capitan') {
+      const e = await db
+        .from('evento')
+        .where('id_evento', idEvento)
+        .where('id_capitan', usuario.id)
+        .first()
+      if (e) return
+
+      throw new SgebError('SGEB-1004', {
+        tecnico: `sub=${uuidUsuario} no dirige el evento ${idEvento}.`,
+      })
+    }
+
+    const p = await db
+      .from('participacion_evento')
+      .where('id_evento', idEvento)
+      .where('id_usuario', usuario.id)
+      .first()
+
+    if (!p) {
+      throw new SgebError('SGEB-1004', {
+        tecnico: `sub=${uuidUsuario} sin participación en el evento ${idEvento}.`,
+      })
+    }
+  }
+
+  async evento(idEvento: number, secciones: string[] | undefined, sujeto: { uuid: string; rol: string }) {
     const evento = await Evento.query().where('id_evento', idEvento).preload('salon').first()
     if (!evento) throw errores.noEncontrado('EVENTO', idEvento)
+
+    await this.verificarAcceso(idEvento, sujeto.uuid, sujeto.rol)
 
     const pedidas = (secciones?.length ? secciones : TODAS).filter((s): s is Seccion =>
       TODAS.includes(s as Seccion)
