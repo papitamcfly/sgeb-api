@@ -32,10 +32,10 @@ export const recetaValidator = vine.compile(
     ingredientes: vine
       .array(
         vine.object({
-          idInsumo: vine.number().positive(),
-          tipoPorcion: vine.enum(['PROPORCION', 'FIJO_ML', 'RESTO'] as const),
+          id_insumo: vine.number().positive(),
+          tipo_porcion: vine.enum(['PROPORCION', 'FIJO_ML', 'RESTO'] as const),
           valor: vine.number().min(0).max(999.99),
-          ordenServido: vine.number().min(1).max(255),
+          orden_servido: vine.number().min(1).max(255),
         })
       )
       .minLength(1),
@@ -45,7 +45,7 @@ export const recetaValidator = vine.compile(
 export const envaseValidator = vine.compile(
   vine.object({
     nombre: vine.string().trim().minLength(2).maxLength(50),
-    volumenMl: vine.number().min(1).max(65535),
+    volumen_ml: vine.number().min(1).max(65535),
   })
 )
 
@@ -76,6 +76,6 @@ export const bebidaParcialValidator = vine.compile(
 export const envaseParcialValidator = vine.compile(
   vine.object({
     nombre: vine.string().trim().minLength(2).maxLength(50).optional(),
-    volumenMl: vine.number().min(1).max(65535).optional(),
+    volumen_ml: vine.number().min(1).max(65535).optional(),
   })
 )
