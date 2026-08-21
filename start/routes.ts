@@ -237,7 +237,6 @@ router
          * existe: sin él, `ultima_conexion` nunca se actualizaba y el dashboard
          * marcaba todos los Cubaitores fuera de línea para siempre.
          */
-        router.post('/cubaitors/heartbeat', '#modules/cubaitor/controllers/cubaitor_controller.heartbeat')
         router.get('/eventos/:id_evento/alertas', '#modules/cubaitor/controllers/cubaitor_controller.alertas')
 
         /** Paneles: el del evento lo miran los tres roles desde el salón. */
