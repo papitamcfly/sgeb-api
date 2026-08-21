@@ -73,6 +73,17 @@ export default class CubaitorController {
    * una persona. Su identidad la da la red privada WireGuard más las
    * credenciales del broker MQTT.
    */
+  /**
+   * Latido del dispositivo, por MAC.
+   *
+   * Se identifica por MAC y no por token de usuario porque quien late es el
+   * equipo, no una persona: el Cubaitor no tiene cuenta.
+   *
+   * El método existía pero **no tenía ruta registrada**, así que
+   * `ultima_conexion` nunca se actualizaba y el dashboard marcaba todos los
+   * dispositivos fuera de línea para siempre. El camino definitivo es el tema
+   * MQTT `{prefijo}/{dev}/estado`; esta ruta lo cubre mientras tanto.
+   */
   async heartbeat(ctx: HttpContext) {
     const { mac } = await heartbeatValidator.validate(ctx.request.body())
     return responder.ok(ctx, await this.cubaitor.heartbeat(mac))

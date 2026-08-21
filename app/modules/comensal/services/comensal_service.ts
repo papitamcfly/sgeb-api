@@ -8,6 +8,7 @@ import SolicitudServicio from '#modules/comensal/models/solicitud_servicio'
 import Calificacion from '#modules/comensal/models/calificacion'
 import AsignacionMesa from '#modules/participaciones/models/asignacion_mesa'
 import { EventoService } from '#modules/eventos/services/evento_service'
+import { IdentidadService } from '#modules/identidad/identidad_service'
 import { SgebError, errores } from '#shared/errors/sgeb_error'
 
 /**
@@ -29,7 +30,10 @@ const SEGUNDOS_ANTISPAM = 120
 
 @inject()
 export class ComensalService {
-  constructor(private eventos: EventoService) {}
+  constructor(
+    private eventos: EventoService,
+    private identidad: IdentidadService
+  ) {}
 
   /**
    * El comensal llama al mesero desde el QR de su mesa (RF-23).
@@ -116,7 +120,26 @@ export class ComensalService {
    * histórico distingue "se atendió" de "se descartó", que es justo lo que el
    * capitán necesita al medir el tiempo de respuesta.
    */
-  async cambiarEstado(idSolicitud: number, estado: 'atendida' | 'cancelada', idParticipacion?: number) {
+  /**
+   * El mesero atiende o cancela una solicitud.
+   *
+   * **Quién la resolvió lo deduce el SERVIDOR, no lo declara el cliente.**
+   *
+   * Antes llegaba `id_participacion` en el cuerpo y se guardaba sin verificar
+   * nada: un mesero podía atribuirse la atención de otro, o adjudicársela a un
+   * compañero. Eso importa porque de ese campo cuelga el indicador de tiempo de
+   * respuesta, que es dato de desempeño.
+   *
+   * Ahora se resuelve desde el sujeto del token: se busca la participación de
+   * quien llama **en el evento de esa mesa**. Si no tiene, SGEB-1004.
+   */
+  async cambiarEstado(
+    idSolicitud: number,
+    estado: 'atendida' | 'cancelada',
+    uuidUsuario: string
+  ) {
+    const usuario = await this.identidad.resolverPorUuid(uuidUsuario)
+
     return db.transaction(async (trx) => {
       const s = await SolicitudServicio.query({ client: trx })
         .where('id_solicitud', idSolicitud)
@@ -137,13 +160,31 @@ export class ComensalService {
         })
       }
 
+      const mesa = await Mesa.findOrFail(s.idMesa, { client: trx })
+
+      /**
+       * La participación de quien llama en ESTE evento. Un mesero puede trabajar
+       * en varios, así que no basta con buscar por usuario.
+       */
+      const propia = await trx
+        .from('participacion_evento')
+        .where('id_evento', mesa.idEvento)
+        .where('id_usuario', usuario.id)
+        .first()
+
+      if (!propia) {
+        throw new SgebError('SGEB-1004', {
+          tecnico:
+            `sub=${uuidUsuario} sin participación en el evento ${mesa.idEvento}, ` +
+            `al que pertenece la MESA ${mesa.id} de la solicitud ${idSolicitud}.`,
+        })
+      }
+
       s.estado = estado
       s.atendidaEn = DateTime.now()
       /** Se registra quién la resolvió, para el indicador de tiempo de respuesta. */
-      if (idParticipacion) s.idParticipacion = idParticipacion
+      s.idParticipacion = propia.id_participacion
       await s.useTransaction(trx).save()
-
-      const mesa = await Mesa.findOrFail(s.idMesa, { client: trx })
       return { solicitud: s, idEvento: mesa.idEvento }
     }).then((r) => {
       emitter.emit('solicitud:cambio', {

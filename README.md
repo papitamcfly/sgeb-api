@@ -1085,6 +1085,44 @@ Las ventanas son generosas a proposito: `login` permite 20 en 15 minutos. Un hum
 
 ---
 
+### Autorizacion por pertenencia
+
+Dos endpoints la tenian pendiente y lo detecto el equipo de frontend auditando.
+
+**`GET /eventos/{id}/dashboard`** no verificaba nada: cualquier autenticado que adivinara un id veia plantilla, ordenes, calificaciones y alertas de un evento ajeno. **Los ids son enteros secuenciales**, asi que adivinarlos es contar.
+
+Ahora sigue la misma regla que la comanda: admin cualquiera, capitan los que dirige, mesero donde tiene participacion.
+
+**`PATCH /solicitudes/{id}/estado`** aceptaba `id_participacion` del cuerpo y lo guardaba sin verificar. Un mesero podia atribuirse la atencion de otro — y de ese campo cuelga el indicador de tiempo de respuesta, que es dato de desempeno.
+
+Ahora **el servidor lo deduce del token**: busca la participacion de quien llama en el evento de esa mesa. Sin participacion, SGEB-1004.
+
+> La leccion: un endpoint de solo lectura tambien necesita autorizacion. Es facil revisarla en los que escriben y olvidarla en los que leen.
+
+### Reporte de desempeno historico
+
+`GET /reportes/desempeno-meseros`. Agregado por persona en un rango de fechas.
+
+**No confundir con `/dashboard/meseros`**, que es self-service —lo que le toca hacer AHORA a quien pregunta—. El OpenAPI documentaba el reporte historico alli por error.
+
+#### Lo que no se puede medir se devuelve null, no cero
+
+Un cero dice "midio cero"; `null` dice "no hay dato". La diferencia importa cuando de esto dependen decisiones sobre el trabajo de una persona.
+
+**Puntualidad va siempre `null`.** Haria falta comparar la llegada con `hora_presentacion`, pero la marca de confirmacion depende de cuando el capitan la pide y de si habia senal: el mesero puede estar en el salon media hora antes de confirmar. Devolver un numero inventado seria peor que no devolverlo.
+
+**Tiempo de respuesta** mide hasta que se **marca** atendida, no hasta que el mesero llega a la mesa: es lo unico que el sistema observa. Sirve para comparar entre personas, no como cifra absoluta.
+
+#### Los eventos cancelados se excluyen
+
+Nadie trabajo en ellos, y contarlos como falta castigaria al mesero por una decision del cliente.
+
+#### `aparto` no cuenta como falta
+
+Apartar es mostrar interes; no ser elegido no es faltar. Solo cuentan `seleccionado` y `confirmo_asistencia`: ahi si habia compromiso.
+
+---
+
 ## Lo que falta
 
 1. **Correo** para códigos 2FA, invitaciones y recuperación. Hoy el código se escribe en el log fuera de producción (`[DEV] Codigo de verificacion: 123456`), que es lo que permite desarrollar sin servidor de correo.

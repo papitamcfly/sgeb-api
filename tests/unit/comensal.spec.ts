@@ -112,10 +112,10 @@ test.group('Comensal', (group) => {
   })
 
   test('atender la solicitud libera la mesa para una nueva', async ({ assert }) => {
-    const { mesa, participacion, comensal } = await escenario()
+    const { mesa, comensal } = await escenario()
     const s = await comensal.solicitar(mesa.codigoQr, 'atencion')
 
-    await comensal.cambiarEstado(s.id, 'atendida', participacion.id)
+    await comensal.cambiarEstado(s.id, 'atendida', UUID_MESERO)
     const otra = await comensal.solicitar(mesa.codigoQr, 'cuenta')
 
     assert.equal(otra.estado, 'pendiente')
@@ -125,7 +125,7 @@ test.group('Comensal', (group) => {
   test('cancelar también libera: una solicitud sin atender no bloquea la mesa', async ({
     assert,
   }) => {
-    const { mesa, participacion, comensal } = await escenario()
+    const { mesa, comensal } = await escenario()
     const s = await comensal.solicitar(mesa.codigoQr, 'atencion')
 
     /**
@@ -133,20 +133,20 @@ test.group('Comensal', (group) => {
      * levantó, o pidió por error— bloquearía la mesa para siempre, y el mesero
      * tendría que mentir diciendo que la atendió.
      */
-    await comensal.cambiarEstado(s.id, 'cancelada', participacion.id)
+    await comensal.cambiarEstado(s.id, 'cancelada', UUID_MESERO)
     const otra = await comensal.solicitar(mesa.codigoQr, 'atencion')
     assert.equal(otra.estado, 'pendiente')
   })
 
   test('SGEB-4021: dos meseros tomando la misma solicitud, gana el primero', async ({ assert }) => {
-    const { mesa, participacion, participacion2, comensal } = await escenario()
+    const { mesa, participacion, comensal } = await escenario()
     const s = await comensal.solicitar(mesa.codigoQr, 'atencion')
 
-    await comensal.cambiarEstado(s.id, 'atendida', participacion.id)
+    await comensal.cambiarEstado(s.id, 'atendida', UUID_MESERO)
 
     /** El segundo recibe SGEB-4021 y su bandeja se refresca. */
     assert.equal(
-      await codigo(() => comensal.cambiarEstado(s.id, 'atendida', participacion2.id)),
+      await codigo(() => comensal.cambiarEstado(s.id, 'atendida', UUID_MESERO2)),
       'SGEB-4021'
     )
 

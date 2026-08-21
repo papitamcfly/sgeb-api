@@ -17,6 +17,7 @@ const UUID_ADMIN = '11111111-1111-4111-8111-111111111111'
 const UUID_CAP = '3f2a9c14-8b7e-4d61-9a03-2c5e77b1d840'
 const UUID_MESERO = 'aa2a9c14-8b7e-4d61-9a03-2c5e77b1d841'
 const CLABE = '012180012345678909'
+const SUJETO_CAP = { uuid: UUID_CAP, rol: 'capitan' }
 
 async function codigo(fn: () => Promise<unknown>): Promise<string> {
   try {
@@ -340,7 +341,7 @@ test.group('Dashboard', (group) => {
 
   test('el dashboard del evento devuelve todas las secciones', async ({ assert }) => {
     const { evento, dashboard } = await escenario()
-    const r = await dashboard.evento(evento.id)
+    const r = await dashboard.evento(evento.id, undefined, SUJETO_CAP)
 
     assert.lengthOf(r.fallidas, 0)
     for (const s of ['resumen', 'asistencia', 'montaje', 'piso', 'barra', 'servicio', 'alertas']) {
@@ -360,7 +361,7 @@ test.group('Dashboard', (group) => {
      * El panel del capitán en el salón refresca "barra" y "servicio" cada pocos
      * segundos; no tiene por qué recalcular el cierre cada vez.
      */
-    const r = await dashboard.evento(evento.id, ['barra', 'servicio'])
+    const r = await dashboard.evento(evento.id, ['barra', 'servicio'], SUJETO_CAP)
 
     assert.property(r.data, 'barra')
     assert.property(r.data, 'servicio')
@@ -370,7 +371,7 @@ test.group('Dashboard', (group) => {
 
   test('una sección inválida se ignora en vez de romper', async ({ assert }) => {
     const { evento, dashboard } = await escenario()
-    const r = await dashboard.evento(evento.id, ['barra', 'inventada'])
+    const r = await dashboard.evento(evento.id, ['barra', 'inventada'], SUJETO_CAP)
 
     assert.property(r.data, 'barra')
     assert.notProperty(r.data, 'inventada')
@@ -379,7 +380,7 @@ test.group('Dashboard', (group) => {
 
   test('el promedio de calificación es null sin datos, no cero', async ({ assert }) => {
     const { evento, dashboard } = await escenario()
-    const r = await dashboard.evento(evento.id, ['servicio'])
+    const r = await dashboard.evento(evento.id, ['servicio'], SUJETO_CAP)
 
     const servicio = r.data.servicio as Record<string, unknown>
     assert.isNull(servicio.promedio_calificacion)
