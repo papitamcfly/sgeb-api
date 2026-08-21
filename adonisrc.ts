@@ -30,6 +30,9 @@ export default defineConfig({
 
     /** Elige transporte de correo y push según CORREO_MODO y PUSH_MODO. */
     () => import('#providers/mensajeria_provider'),
+
+    /** Inicia la conexión persistente con el broker MQTT para las válvulas. */
+    () => import('#providers/mqtt_provider'),
   ],
 
   preloads: [() => import('#start/routes'), () => import('#start/kernel')],
