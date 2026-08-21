@@ -130,13 +130,11 @@ export class CubaitorService {
    * Recalibra un pin.
    *
    * `caudalMlSeg` es lo que se ajusta en la práctica: la manguera se dobla, la
-   * botella baja de nivel y el caudal cambia. NO se toca `volumenDisponibleMl`
-   * desde aquí — para eso existe `recargar()`, que además reanuda las órdenes
-   * pausadas.
+   * botella baja de nivel y el caudal cambia.
    */
   async actualizarConfig(
     idConfig: number,
-    datos: Partial<{ caudalMlSeg: number; pinGpio: number }>
+    datos: Partial<{ caudalMlSeg: number; pinGpio: number; idInsumo: number; volumenCargadoMl: number }>
   ): Promise<ConfigDispensado> {
     const c = await ConfigDispensado.find(idConfig)
     if (!c) throw errores.noEncontrado('CONFIG_DISPENSADO', idConfig)
@@ -146,6 +144,12 @@ export class CubaitorService {
       c.ultimaCalibracion = DateTime.now()
     }
     if (datos.pinGpio !== undefined) c.pinGpio = datos.pinGpio
+    if (datos.idInsumo !== undefined) c.idInsumo = datos.idInsumo
+    if (datos.volumenCargadoMl !== undefined) {
+      // Ajustamos tanto el volumen de carga como el volumen actual si se resetea la botella
+      c.volumenCargadoMl = datos.volumenCargadoMl
+      c.volumenDisponibleMl = datos.volumenCargadoMl
+    }
 
     try {
       await c.save()

@@ -205,12 +205,13 @@ test.group('Órdenes y dispensado', (group) => {
 
     const r = await ordenes.procesarDetalle(orden.detalles[0].id)
 
-    assert.lengthOf(r.instrucciones, 2)
+    assert.lengthOf(r, 2)
     /** Ron primero: el vaso lleva hielo. */
-    assert.equal(r.instrucciones[0].pin_gpio, 12)
-    assert.equal(r.instrucciones[0].volumen_ml, 45)
-    assert.equal(r.instrucciones[0].segundos, 2.9)
-    assert.equal(r.instrucciones[1].volumen_ml, 252)
+    const configRon = await ConfigDispensado.findOrFail(r[0].idConfig)
+    assert.equal(configRon.pinGpio, 12)
+    assert.equal(r[0].volumenSolicitadoMl, 45)
+    assert.equal(r[0].segundosCalculado, 2.9)
+    assert.equal(r[1].volumenSolicitadoMl, 252)
 
     /** El volumen disponible se descuenta al abrir la válvula, no antes. */
     const config = await ConfigDispensado.findOrFail(cRon.id)
@@ -278,7 +279,7 @@ test.group('Órdenes y dispensado', (group) => {
     assert.equal((await Orden.findOrFail(orden.id)).estado, 'pendiente')
 
     const ok = await ordenes.procesarDetalle(orden.detalles[0].id)
-    assert.lengthOf(ok.instrucciones, 2)
+    assert.lengthOf(ok, 2)
   })
 
   test('marcar un insumo agotado pausa las órdenes que lo usan', async ({ assert }) => {
@@ -302,7 +303,7 @@ test.group('Órdenes y dispensado', (group) => {
       lineas: [{ idBebida: cuba.id, idEnvase: vaso.id, cantidad: 1 }],
     })
     const r = await ordenes.procesarDetalle(orden.detalles[0].id)
-    const idDisp = r.instrucciones[0].id_dispensado
+    const idDisp = r[0].id
 
     /** Salió menos del 90 % de lo pedido: el mesero tiene que verlo antes de servir. */
     const parcial = await ordenes.reportarDispensado(idDisp, 1.0)
@@ -322,7 +323,7 @@ test.group('Órdenes y dispensado', (group) => {
     const r = await ordenes.procesarDetalle(orden.detalles[0].id)
 
     assert.equal(
-      await codigo(() => ordenes.reportarDispensado(r.instrucciones[0].id_dispensado, null)),
+      await codigo(() => ordenes.reportarDispensado(r[0].id, null)),
       'SGEB-5006'
     )
   })

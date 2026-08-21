@@ -116,6 +116,7 @@ router
         // ── Cubaitor y configuración de pines ─────────────────────────
         router.get('/cubaitors', '#modules/cubaitor/controllers/cubaitor_controller.listar')
         router.post('/cubaitors', '#modules/cubaitor/controllers/cubaitor_controller.registrar')
+        router.post('/cubaitors/heartbeat', '#modules/cubaitor/controllers/cubaitor_controller.heartbeat')
         router.get('/cubaitors/:id_cubaitor/estado', '#modules/cubaitor/controllers/cubaitor_controller.estado')
 
         router.get('/eventos/:id_evento/config-dispensado', '#modules/cubaitor/controllers/cubaitor_controller.listarConfig')
@@ -262,6 +263,7 @@ router
          * un mesero con puesto 'barra' o el propio capitán. Por eso van aquí y
          * no en el grupo exclusivo de meseros.
          */
+        router.get('/orden-detalles/:id_detalle/dispensados', '#modules/ordenes/controllers/ordenes_controller.obtenerDispensados')
         router.post('/orden-detalles/:id_detalle/dispensar', '#modules/ordenes/controllers/ordenes_controller.dispensar')
         router.patch('/dispensados/:id_dispensado/reporte', '#modules/ordenes/controllers/ordenes_controller.reportar')
       })

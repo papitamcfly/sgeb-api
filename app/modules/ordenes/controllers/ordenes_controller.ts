@@ -29,7 +29,11 @@ export default class OrdenesController {
     const datos = await crearOrdenValidator.validate(ctx.request.body())
     return responder.creado(
       ctx,
-      await this.ordenes.crear({ ...datos, idMesa: Number(ctx.request.param('id_mesa')) })
+      await this.ordenes.crear({
+        idMesa: Number(ctx.request.param('id_mesa')),
+        idParticipacion: datos.id_participacion,
+        lineas: datos.lineas.map(l => ({ idBebida: l.id_bebida, idEnvase: l.id_envase, cantidad: l.cantidad }))
+      })
     )
   }
 
@@ -55,8 +59,13 @@ export default class OrdenesController {
 
   /** Reporte del dispositivo al cerrar la válvula. */
   async reportar(ctx: HttpContext) {
-    const { segundosReal } = await reporteValidator.validate(ctx.request.body())
-    const d = await this.ordenes.reportarDispensado(ctx.request.param('id_dispensado'), segundosReal)
+    const { segundos_real } = await reporteValidator.validate(ctx.request.body())
+    const d = await this.ordenes.reportarDispensado(ctx.request.param('id_dispensado'), segundos_real)
     return responder.ok(ctx, d)
+  }
+
+  async obtenerDispensados(ctx: HttpContext) {
+    const ds = await this.ordenes.obtenerDispensados(ctx.request.param('id_detalle'))
+    return responder.lista(ctx, ds)
   }
 }

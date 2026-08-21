@@ -56,7 +56,7 @@ export default class MenuController {
 
     return responder.ok(
       ctx,
-      { insumo: r.insumo, ordenes_pausadas: r.ordenesPausadas },
+      r.insumo,
       r.ordenesPausadas > 0
         ? `INSUMO id=${r.insumo.id} → ${estado}. ${r.ordenesPausadas} detalles pausados.`
         : undefined
@@ -96,7 +96,10 @@ export default class MenuController {
   /** Reemplaza la receta completa; no admite parches parciales. */
   async definirReceta(ctx: HttpContext) {
     const { ingredientes } = await recetaValidator.validate(ctx.request.body())
-    const b = await this.menu.definirReceta(ctx.request.param('id_bebida'), ingredientes)
+    const b = await this.menu.definirReceta(
+      ctx.request.param('id_bebida'),
+      ingredientes.map(i => ({ idInsumo: i.id_insumo, tipoPorcion: i.tipo_porcion, valor: i.valor, ordenServido: i.orden_servido }))
+    )
     return responder.ok(ctx, b)
   }
 
@@ -117,12 +120,18 @@ export default class MenuController {
 
   async actualizarEnvase(ctx: HttpContext) {
     const datos = await envaseParcialValidator.validate(ctx.request.body())
-    return responder.ok(ctx, await this.menu.actualizarEnvase(ctx.request.param('id_envase'), datos))
+    return responder.ok(ctx, await this.menu.actualizarEnvase(ctx.request.param('id_envase'), {
+      nombre: datos.nombre,
+      volumenMl: datos.volumen_ml,
+    }))
   }
 
   async crearEnvase(ctx: HttpContext) {
     const datos = await envaseValidator.validate(ctx.request.body())
-    return responder.creado(ctx, await this.menu.crearEnvase(datos))
+    return responder.creado(ctx, await this.menu.crearEnvase({
+      nombre: datos.nombre,
+      volumenMl: datos.volumen_ml,
+    }))
   }
 
   async desactivarEnvase(ctx: HttpContext) {

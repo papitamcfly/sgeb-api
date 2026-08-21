@@ -26,7 +26,12 @@ export default class CubaitorController {
   /** La MAC no se edita: es la identidad física del dispositivo. */
   async actualizar(ctx: HttpContext) {
     const datos = await cubaitorParcialValidator.validate(ctx.request.body())
-    return responder.ok(ctx, await this.cubaitor.actualizar(ctx.request.param('id_cubaitor'), datos))
+    return responder.ok(ctx, await this.cubaitor.actualizar(ctx.request.param('id_cubaitor'), {
+      nombre: datos.nombre,
+      numPins: datos.num_pins,
+      hostIp: datos.host_ip,
+      estado: datos.estado,
+    }))
   }
 
   async desactivar(ctx: HttpContext) {
@@ -36,12 +41,19 @@ export default class CubaitorController {
 
   /** Alertas derivadas del estado actual; no hay tabla de alertas. */
   async alertas(ctx: HttpContext) {
-    return responder.ok(ctx, await this.cubaitor.alertas(ctx.request.param('id_evento')))
+    const r = await this.cubaitor.alertas(ctx.request.param('id_evento'))
+    // Punto 4: Devolver la lista directa (AlertaOperativa[]) en lugar de un wrapper
+    return responder.lista(ctx, r.alertas)
   }
 
   async actualizarConfig(ctx: HttpContext) {
     const datos = await configParcialValidator.validate(ctx.request.body())
-    return responder.ok(ctx, await this.cubaitor.actualizarConfig(ctx.request.param('id_config'), datos))
+    return responder.ok(ctx, await this.cubaitor.actualizarConfig(ctx.request.param('id_config'), {
+      caudalMlSeg: datos.caudal_ml_seg,
+      pinGpio: datos.pin_gpio,
+      idInsumo: datos.id_insumo,
+      volumenCargadoMl: datos.volumen_cargado_ml,
+    }))
   }
 
   async desactivarConfig(ctx: HttpContext) {
@@ -51,7 +63,12 @@ export default class CubaitorController {
 
   async registrar(ctx: HttpContext) {
     const datos = await cubaitorValidator.validate(ctx.request.body())
-    return responder.creado(ctx, await this.cubaitor.registrar(datos))
+    return responder.creado(ctx, await this.cubaitor.registrar({
+      nombre: datos.nombre,
+      mac: datos.mac,
+      numPins: datos.num_pins,
+      hostIp: datos.host_ip,
+    }))
   }
 
   /**
@@ -87,8 +104,12 @@ export default class CubaitorController {
   async configurarPin(ctx: HttpContext) {
     const datos = await configPinValidator.validate(ctx.request.body())
     const c = await this.cubaitor.configurarPin({
-      ...datos,
       idEvento: ctx.request.param('id_evento'),
+      idCubaitor: datos.id_cubaitor,
+      idInsumo: datos.id_insumo,
+      pinGpio: datos.pin_gpio,
+      caudalMlSeg: datos.caudal_ml_seg,
+      volumenCargadoMl: datos.volumen_cargado_ml,
     })
     return responder.creado(ctx, c)
   }
@@ -101,13 +122,14 @@ export default class CubaitorController {
     const datos = await recargaValidator.validate(ctx.request.body())
     const r = await this.cubaitor.recargar(
       ctx.request.param('id_config'),
-      datos.volumenCargadoMl,
-      datos.reanudarOrdenes ?? true
+      datos.volumen_cargado_ml,
+      datos.reanudar_ordenes ?? true
     )
 
+    // Punto 5: Devolver el recurso base ConfigDispensado en lugar de un wrapper anidado
     return responder.ok(
       ctx,
-      { config: r.config, detalles_reanudados: r.detallesReanudados },
+      r.config,
       `CONFIG_DISPENSADO id=${r.config.id} recargada. ${r.detallesReanudados} detalles reanudados.`
     )
   }

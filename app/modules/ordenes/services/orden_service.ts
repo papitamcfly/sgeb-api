@@ -320,14 +320,8 @@ export class OrdenService {
         mqttService.publicarInstrucciones(mcsPorConfig[idCubaitor], [instruccionesResponse[i]])
       }
 
-      return {
-        id_detalle: detalle.id,
-        idEvento: mesa.idEvento,
-        idOrden: orden.id,
-        idMesa: orden.idMesa,
-        estadoOrden: orden.estado,
-        instrucciones: instruccionesResponse,
-      }
+      // Punto 3: Devolver la lista pura de modelos Dispensado en vez del shape bespoke
+      return dispensados
       })
     } finally {
       if (pausar !== null) {
@@ -477,5 +471,10 @@ export class OrdenService {
       })
       return r.orden
     })
+  }
+
+  // Punto 7: Endpoint para recuperar dispensados después del reload
+  async obtenerDispensados(idDetalle: number) {
+    return Dispensado.query().where('id_detalle', idDetalle)
   }
 }
