@@ -79,10 +79,16 @@ export default class CubaitorController {
    * Se identifica por MAC y no por token de usuario porque quien late es el
    * equipo, no una persona: el Cubaitor no tiene cuenta.
    *
-   * El método existía pero **no tenía ruta registrada**, así que
-   * `ultima_conexion` nunca se actualizaba y el dashboard marcaba todos los
-   * dispositivos fuera de línea para siempre. El camino definitivo es el tema
-   * MQTT `{prefijo}/{dev}/estado`; esta ruta lo cubre mientras tanto.
+   * **Respaldo permanente del MQTT**, decidido con el equipo (agosto 2026).
+   * No se retira cuando llegue el cliente MQTT.
+   *
+   * La vía normal es el tema `{prefijo}/{dev}/estado`. Esta ruta cubre dos
+   * casos que el MQTT no resuelve: diagnosticar un dispositivo sin depender del
+   * broker —cuando lo que falla es justamente el broker o el túnel—, y operar
+   * mientras el cliente MQTT no exista.
+   *
+   * Ambas vías escriben el mismo campo, así que da igual por cuál llegue el
+   * latido: el umbral de 120 s se aplica igual.
    */
   async heartbeat(ctx: HttpContext) {
     const { mac } = await heartbeatValidator.validate(ctx.request.body())

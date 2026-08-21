@@ -185,16 +185,20 @@ export class ReporteService {
         segundos_respuesta_promedio: this.promedioRespuesta(solicitudes),
 
         /**
-         * **Puntualidad: no se puede calcular honestamente hoy.**
+         * **Siempre `null`. Descartado por el equipo (agosto 2026), no pendiente.**
          *
-         * Haría falta comparar la hora de llegada con `hora_presentacion`, y
-         * `CONFIRMACION_LLEGADA` guarda la marca del intento exitoso — pero el
-         * mesero puede estar en el salón media hora antes de que el capitán le
+         * No se puede calcular honestamente con lo que el sistema observa:
+         * `CONFIRMACION_LLEGADA` guarda cuándo el mesero confirmó, no cuándo
+         * llegó. Puede estar en el salón media hora antes de que el capitán le
          * pida confirmar, o confirmar tarde porque no había señal.
          *
          * Devolver un número inventado sería peor que no devolverlo: de esto
-         * dependen decisiones sobre a quién se vuelve a llamar. Ver la nota del
-         * documento de respuestas para lo que haría falta medirlo de verdad.
+         * dependen decisiones sobre a quién se vuelve a llamar a trabajar.
+         *
+         * Medirlo exigiría un registro de entrada real —un escaneo en la
+         * puerta, o confirmación automática al entrar en la geocerca—. El campo
+         * se conserva en la respuesta para no romper el contrato el día que se
+         * decida implementarlo.
          */
         puntualidad: null,
       })
