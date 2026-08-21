@@ -1,5 +1,22 @@
 import env from '#start/env'
+import app from '@adonisjs/core/services/app'
 import { defineConfig } from '@adonisjs/lucid'
+
+/**
+ * Solo en producción: el Postgres del VPS 3 exige SSL, pero el Postgres
+ * local de desarrollo (y el que usan las pruebas) no lo soporta — forzarlo
+ * ahí rompe la conexión con "The server does not support SSL connections".
+ * Mismo criterio que `app.inProduction` en `config/logger.ts`.
+ *
+ * Extraída como función pura (en vez de inline) porque `dbConfig` se
+ * construye una sola vez, al importar este módulo — mucho antes de que una
+ * prueba pueda forzar `app.inProduction`, a diferencia de
+ * `SesionSsoService`, que lee `app.inDev` en cada llamada. Ver
+ * `tests/unit/config_database.spec.ts`.
+ */
+export function resolverSslPostgres(enProduccion: boolean): { rejectUnauthorized: false } | false {
+  return enProduccion ? { rejectUnauthorized: false } : false
+}
 
 /**
  * PostgreSQL en el VPS 3, alcanzable únicamente por la red privada WireGuard.
@@ -18,7 +35,7 @@ const dbConfig = defineConfig({
         user: env.get('DB_USER'),
         password: env.get('DB_PASSWORD'),
         database: env.get('DB_DATABASE'),
-        ssl: { rejectUnauthorized: false },
+        ssl: resolverSslPostgres(app.inProduction),
       },
       /**
        * `auth` aloja las 9 tablas del módulo de identidad; `public` el dominio.
