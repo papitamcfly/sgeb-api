@@ -328,6 +328,34 @@ test.group('Órdenes y dispensado', (group) => {
     )
   })
 
+  test('el listado trae los dispensados anidados: rehidratación en una consulta', async ({
+    assert,
+  }) => {
+    const { ordenes, evento, mesa, participacion, cuba, vaso } = await barra()
+    const orden = await ordenes.crear({
+      idMesa: mesa.id,
+      idParticipacion: participacion.id,
+      lineas: [{ idBebida: cuba.id, idEnvase: vaso.id, cantidad: 1 }],
+    })
+    await ordenes.procesarDetalle(orden.detalles[0].id)
+
+    /**
+     * Sin esto, tras recargar la página el tablero perdía qué dispensados
+     * esperaban confirmación, y pedirlos uno a uno serían N+1 peticiones en la
+     * pantalla que más se refresca.
+     */
+    const lista = await ordenes.listarPorEvento(evento.id)
+    const detalle = lista[0].detalles[0]
+
+    assert.isArray(detalle.dispensados)
+    assert.isAbove(detalle.dispensados.length, 0)
+
+    const d = detalle.dispensados[0].serialize()
+    assert.property(d, 'id_dispensado')
+    assert.property(d, 'segundos_calculado')
+    assert.property(d, 'estado')
+  })
+
   test('no se entrega una orden con renglones sin dispensar', async ({ assert }) => {
     const { mesa, participacion, cuba, vaso, ordenes } = await barra()
     const orden = await ordenes.crear({

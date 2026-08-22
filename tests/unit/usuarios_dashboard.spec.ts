@@ -44,32 +44,90 @@ test.group('Usuarios', (group) => {
     return app.container.make(UsuarioService)
   }
 
-  test('el alta NO crea una contraseña utilizable', async ({ assert }) => {
+  test('el alta emite invitación y NO crea la cuenta todavía', async ({ assert }) => {
     const s = await servicio()
-    const u = await s.crear(
+    const r = await s.crear(
       { idRol: 3, nombre: 'Ana', apellidoPaterno: 'Lopez', correo: 'Ana@X.MX' },
-      UUID_ADMIN
+      UUID_ADMIN,
+      'admin'
     )
 
-    assert.equal(u.correo, 'ana@x.mx')
-    assert.match(u.uuidUsuario, /^[0-9a-f-]{36}$/)
+    assert.equal(r.correo, 'ana@x.mx')
+    assert.include(r.deeplink, 'mx.mediocres.sgeb://registro?token=')
 
     /**
-     * Ningún hash Bcrypt empieza así, de modo que nadie puede entrar hasta que
-     * el proveedor emita la invitación y el usuario defina la suya.
+     * La cuenta la crea el módulo de invitaciones al completar el registro.
+     * Crearla antes producía una cuenta viva sin credencial que la invitación
+     * luego rechazaba por correo duplicado: un callejón sin salida.
      */
-    const fila = await db.from('usuario').where('id_usuario', u.id).firstOrFail()
-    assert.equal(fila.password_hash, '!sin-credencial')
-    assert.notMatch(fila.password_hash, /^\$2[aby]\$/)
+    const cuenta = await db.from('usuario').where('correo', 'ana@x.mx').first()
+    assert.isNotOk(cuenta)
+
+    const inv = await db.from('auth.invitacion').where('correo', 'ana@x.mx').firstOrFail()
+    assert.equal(inv.estado, 'pendiente')
   })
 
-  test('SGEB-2006: no se dan de alta dos cuentas con el mismo correo', async ({ assert }) => {
+  test('SGEB-1004: el capitán no da de alta capitanes', async ({ assert }) => {
+    const s = await servicio()
+
+    /** Un capitán que pudiera crearlos se daría a sí mismo un cómplice. */
+    assert.equal(
+      await codigo(() =>
+        s.crear({ idRol: 2, nombre: 'Otro', apellidoPaterno: 'Cap', correo: 'nuevo@x.mx' }, UUID_CAP, 'capitan')
+      ),
+      'SGEB-1004'
+    )
+
+    /** Meseros sí. */
+    const r = await s.crear(
+      { idRol: 3, nombre: 'Ana', apellidoPaterno: 'Lopez', correo: 'ana@x.mx' },
+      UUID_CAP,
+      'capitan'
+    )
+    assert.isString(r.deeplink)
+  })
+
+  test('el admin sí da de alta capitanes', async ({ assert }) => {
+    const s = await servicio()
+    const r = await s.crear(
+      { idRol: 2, nombre: 'Nuevo', apellidoPaterno: 'Cap', correo: 'cap3@x.mx' },
+      UUID_ADMIN,
+      'admin'
+    )
+    assert.equal(r.rol, 'capitan')
+  })
+
+  test('el capitán solo ve y opera sobre meseros', async ({ assert }) => {
+    const s = await servicio()
+
+    /**
+     * El alcance se aplica en la consulta, no al serializar: así el capitán no
+     * puede deducir cuántos admins hay comparando conteos.
+     */
+    const suyos = await s.listar({ rolSolicitante: 'capitan' })
+    assert.isTrue(suyos.every((u) => u.rol.nombre === 'mesero'))
+
+    const todos = await s.listar({ rolSolicitante: 'admin' })
+    assert.isAbove(todos.length, suyos.length)
+
+    /** Y no puede tocar a otro capitán. */
+    assert.equal(
+      await codigo(() => s.obtener(UUID_ADMIN, { uuid: UUID_CAP, rol: 'capitan' })),
+      'SGEB-1004'
+    )
+    assert.equal(
+      await codigo(() => s.cambiarEstado(UUID_ADMIN, false, UUID_CAP, 'capitan')),
+      'SGEB-1004'
+    )
+  })
+
+  test('SSO-2005: no se invita a un correo que ya tiene cuenta', async ({ assert }) => {
     const s = await servicio()
     assert.equal(
       await codigo(() =>
-        s.crear({ idRol: 3, nombre: 'Otro', apellidoPaterno: 'Uno', correo: 'm@x.mx' }, UUID_ADMIN)
+        s.crear({ idRol: 3, nombre: 'Otro', apellidoPaterno: 'Uno', correo: 'm@x.mx' }, UUID_ADMIN, 'admin')
       ),
-      'SGEB-2006'
+      'SSO-2005'
     )
   })
 
@@ -77,7 +135,7 @@ test.group('Usuarios', (group) => {
     const s = await servicio()
 
     /** Un admin que se desactiva se deja fuera y a nadie más con permisos. */
-    assert.equal(await codigo(() => s.cambiarEstado(UUID_ADMIN, false, UUID_ADMIN)), 'SGEB-4022')
+    assert.equal(await codigo(() => s.cambiarEstado(UUID_ADMIN, false, UUID_ADMIN, 'admin')), 'SGEB-4022')
   })
 
   test('desactivar revoca sesiones, tokens y dispositivos', async ({ assert }) => {
@@ -93,7 +151,7 @@ test.group('Usuarios', (group) => {
       expira_en: DateTime.now().plus({ days: 30 }).toSQL(), activo: true,
     })
 
-    await s.cambiarEstado(UUID_MESERO, false, UUID_ADMIN)
+    await s.cambiarEstado(UUID_MESERO, false, UUID_ADMIN, 'admin')
 
     assert.lengthOf(await db.from('auth.refresh_token').where('id_usuario', u.id).where('revocado', false), 0)
     assert.lengthOf(await db.from('auth.dispositivo_confiable').where('id_usuario', u.id).where('activo', true), 0)
@@ -211,15 +269,18 @@ test.group('Bitácora', (group) => {
     await semilla()
     const s = await app.container.make(UsuarioService)
 
-    const u = await s.crear({ idRol: 3, nombre: 'Ana', apellidoPaterno: 'Lopez', correo: 'ana@x.mx' }, UUID_ADMIN)
-    await s.cambiarEstado(u.uuidUsuario, false, UUID_ADMIN)
+    /** El alta registra la INVITACION; la baja, el USUARIO ya existente. */
+    await s.crear({ idRol: 3, nombre: 'Ana', apellidoPaterno: 'Lopez', correo: 'ana@x.mx' }, UUID_ADMIN, 'admin')
+    await s.cambiarEstado(UUID_MESERO, false, UUID_ADMIN, 'admin')
 
     const bitacora = new BitacoraService()
-    const p = await bitacora.listar({ tipoEntidad: 'USUARIO' })
-    const acciones = p.all().map((m) => m.accion)
 
-    assert.includeMembers(acciones, ['crear', 'desactivar'])
-    assert.equal(p.all()[0].uuidUsuarioResponsable, UUID_ADMIN)
+    const altas = await bitacora.listar({ tipoEntidad: 'INVITACION' })
+    assert.includeMembers(altas.all().map((m) => m.accion), ['crear'])
+
+    const bajas = await bitacora.listar({ tipoEntidad: 'USUARIO' })
+    assert.includeMembers(bajas.all().map((m) => m.accion), ['desactivar'])
+    assert.equal(bajas.all()[0].uuidUsuarioResponsable, UUID_ADMIN)
   })
 
   test('la CLABE también se enmascara en la bitácora', async ({ assert }) => {

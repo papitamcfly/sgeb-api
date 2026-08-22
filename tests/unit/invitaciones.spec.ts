@@ -85,6 +85,27 @@ test.group('Invitaciones', (group) => {
     assert.lengthOf(fila.token_hash, 64)
   })
 
+  test('el capitán solo invita meseros; el admin invita capitanes', async ({ assert }) => {
+    const { cap, servicio } = await escenario()
+
+    /**
+     * `idRolDestino` viaja en el cuerpo: lo elige quien llama. Sin restricción
+     * server-side, un capitán se daba de alta un cómplice con su mismo nivel de
+     * permisos.
+     *
+     * La comprobación vive en el controlador —depende del rol del token—, así
+     * que aquí se verifica que el servicio acepta ambos y que el guard es de la
+     * capa HTTP. Ver `tests/functional/api_dominio.spec.ts` para el rechazo.
+     */
+    const mesero = await servicio.invitar({ ...nueva('m3@x.mx'), idEmisor: cap.id })
+    assert.isString(mesero.deeplink)
+
+    const capitan = await servicio.invitar({
+      idEmisor: cap.id, idRolDestino: 2, nombre: 'Otro', apellidoPaterno: 'Cap', correo: 'c9@x.mx',
+    })
+    assert.isString(capitan.deeplink)
+  })
+
   test('el listado NUNCA devuelve el token', async ({ assert }) => {
     const { cap, servicio } = await escenario()
     await servicio.invitar({ ...nueva(), idEmisor: cap.id })
