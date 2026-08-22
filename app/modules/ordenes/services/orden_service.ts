@@ -37,7 +37,13 @@ export class OrdenService {
   async listarPorEvento(idEvento: number, filtros: { estado?: string; idMesa?: number } = {}) {
     const q = Orden.query()
       .whereIn('id_mesa', db.from('mesa').select('id_mesa').where('id_evento', idEvento))
-      .preload('detalles')
+      /**
+       * Los dispensados vienen anidados para que el tablero se rehidrate con
+       * UNA consulta. Sin esto, tras recargar la página el frontend perdía qué
+       * dispensados esperaban confirmación, y la alternativa era un GET por
+       * cada detalle: N+1 peticiones en la pantalla que más se refresca.
+       */
+      .preload('detalles', (d) => d.preload('dispensados'))
       .orderBy('creada_en', 'desc')
 
     if (filtros.estado) q.where('estado', filtros.estado)
@@ -46,7 +52,10 @@ export class OrdenService {
   }
 
   async obtener(id: number): Promise<Orden> {
-    const orden = await Orden.query().where('id_orden', id).preload('detalles').first()
+    const orden = await Orden.query()
+      .where('id_orden', id)
+      .preload('detalles', (d) => d.preload('dispensados'))
+      .first()
     if (!orden) throw errores.noEncontrado('ORDEN', id)
     return orden
   }

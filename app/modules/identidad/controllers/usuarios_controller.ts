@@ -26,24 +26,42 @@ export default class UsuariosController {
     return responder.lista(ctx, await this.usuarios.listarRoles())
   }
 
+  /**
+   * El capitán ve solo meseros; el admin ve a todos. El alcance se resuelve en
+   * la consulta, no al serializar: así el capitán no puede deducir cuántos
+   * admins hay comparando conteos.
+   */
   async listar(ctx: HttpContext) {
     const filtros = await filtrosUsuarioValidator.validate(ctx.request.qs())
-    return responder.lista(ctx, await this.usuarios.listar(filtros))
+    return responder.lista(
+      ctx,
+      await this.usuarios.listar({ ...filtros, rolSolicitante: ctx.sujeto.rol })
+    )
   }
 
   async mostrar(ctx: HttpContext) {
-    return responder.ok(ctx, await this.usuarios.obtener(ctx.request.param('uuid_usuario')))
+    const u = await this.usuarios.obtener(ctx.request.param('uuid_usuario'), {
+      uuid: ctx.sujeto.uuid,
+      rol: ctx.sujeto.rol,
+    })
+    return responder.ok(ctx, u)
   }
 
+  /**
+   * Alta de personal: **emite la invitación**, no crea la cuenta.
+   *
+   * La cuenta la crea el módulo de invitaciones cuando el usuario completa el
+   * registro y define su contraseña. Crearla antes producía una cuenta viva sin
+   * credencial que la invitación luego rechazaba por correo duplicado.
+   *
+   * Es el mismo camino para meseros y capitanes; solo cambia quién puede
+   * emitirla y con qué rol destino.
+   */
   async crear(ctx: HttpContext) {
     const datos = await crearUsuarioValidator.validate(ctx.request.body())
-    const u = await this.usuarios.crear(datos, ctx.sujeto.uuid, ctx.request.ip())
+    const r = await this.usuarios.crear(datos, ctx.sujeto.uuid, ctx.sujeto.rol, ctx.request.ip())
 
-    return responder.creado(
-      ctx,
-      u,
-      `USUARIO id=${u.id} creado sin credencial. Falta emitir la invitación.`
-    )
+    return responder.creado(ctx, r, 'Invitación enviada. El deeplink no se puede volver a consultar.')
   }
 
   async actualizar(ctx: HttpContext) {
@@ -52,6 +70,7 @@ export default class UsuariosController {
       ctx.request.param('uuid_usuario'),
       datos,
       ctx.sujeto.uuid,
+      ctx.sujeto.rol,
       ctx.request.ip()
     )
     return responder.ok(ctx, u)
@@ -63,6 +82,7 @@ export default class UsuariosController {
       ctx.request.param('uuid_usuario'),
       activo,
       ctx.sujeto.uuid,
+      ctx.sujeto.rol,
       ctx.request.ip()
     )
     return responder.ok(ctx, u)
@@ -76,7 +96,13 @@ export default class UsuariosController {
 
   async actualizarMiPerfil(ctx: HttpContext) {
     const datos = await actualizarUsuarioValidator.validate(ctx.request.body())
-    const u = await this.usuarios.actualizar(ctx.sujeto.uuid, datos, ctx.sujeto.uuid, ctx.request.ip())
+    const u = await this.usuarios.actualizar(
+      ctx.sujeto.uuid,
+      datos,
+      ctx.sujeto.uuid,
+      ctx.sujeto.rol,
+      ctx.request.ip()
+    )
     return responder.ok(ctx, u)
   }
 

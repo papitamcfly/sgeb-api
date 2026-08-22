@@ -1,4 +1,6 @@
-import { BaseModel, column } from '@adonisjs/lucid/orm'
+import { BaseModel, column, hasMany } from '@adonisjs/lucid/orm'
+import type { HasMany } from '@adonisjs/lucid/types/relations'
+import Dispensado from '#modules/ordenes/models/dispensado'
 
 /**
  * Enumerado DISTINTO al de la orden, y no debe confundirse: un detalle puede
@@ -31,4 +33,13 @@ export default class OrdenDetalle extends BaseModel {
 
   @column()
   declare estado: DetalleEstado
+
+  /**
+   * Aperturas de válvula de este renglón. Se precargan al listar órdenes para
+   * que el tablero se rehidrate con **una sola consulta**: tras recargar la
+   * página el frontend necesita saber qué dispensados esperan confirmación, y
+   * pedirlos uno a uno serían N+1 peticiones en la pantalla que más se refresca.
+   */
+  @hasMany(() => Dispensado, { foreignKey: 'idDetalle', localKey: 'id' })
+  declare dispensados: HasMany<typeof Dispensado>
 }

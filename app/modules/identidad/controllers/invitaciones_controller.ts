@@ -5,6 +5,8 @@ import { responder } from '#shared/responder'
 import { InvitacionService } from '#modules/identidad/services/invitacion_service'
 import { IdentidadService } from '#modules/identidad/identidad_service'
 import { BitacoraService } from '#modules/admin/services/bitacora_service'
+import Rol from '#modules/identidad/models/rol'
+import { SgebError } from '#shared/errors/sgeb_error'
 
 const NOMBRE = /^[A-Za-zÁÉÍÓÚáéíóúÑñÜü ' \-]{2,30}$/
 
@@ -65,6 +67,24 @@ export default class InvitacionesController {
    */
   async crear(ctx: HttpContext) {
     const datos = await crearValidator.validate(ctx.request.body())
+
+    /**
+     * El capitán invita **solo meseros**: arma su equipo, no decide la
+     * estructura del negocio. Sin esta comprobación podía darse de alta un
+     * cómplice con su mismo nivel de permisos, y `idRolDestino` viaja en el
+     * cuerpo — lo elige quien llama.
+     */
+    if (ctx.sujeto.rol !== 'admin') {
+      const rol = await Rol.find(datos.idRolDestino)
+      if (rol?.nombre !== 'mesero') {
+        throw new SgebError('SGEB-1004', {
+          tecnico:
+            `rol='${ctx.sujeto.rol}' intentó invitar con id_rol_destino=${datos.idRolDestino} ` +
+            `('${rol?.nombre ?? 'desconocido'}'). Solo el admin invita capitanes y admins.`,
+        })
+      }
+    }
+
     const emisor = await this.identidad.resolverPorUuid(ctx.sujeto.uuid)
 
     const r = await this.invitaciones.invitar({ ...datos, idEmisor: emisor.id })

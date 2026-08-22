@@ -1,10 +1,11 @@
-import { randomUUID } from 'node:crypto'
 import db from '@adonisjs/lucid/services/db'
 import { inject } from '@adonisjs/core'
 import Usuario from '#modules/identidad/models/usuario'
 import Rol from '#modules/identidad/models/rol'
 import DatosBancarios from '#modules/identidad/models/datos_bancarios'
 import { BitacoraService } from '#modules/admin/services/bitacora_service'
+import { IdentidadService } from '#modules/identidad/identidad_service'
+import { InvitacionService } from '#modules/identidad/services/invitacion_service'
 import { SgebError, errores } from '#shared/errors/sgeb_error'
 
 /**
@@ -35,7 +36,11 @@ export interface CrearUsuario {
 
 @inject()
 export class UsuarioService {
-  constructor(private bitacora: BitacoraService) {}
+  constructor(
+    private bitacora: BitacoraService,
+    private identidad: IdentidadService,
+    private invitaciones: InvitacionService
+  ) {}
 
   // ══════════════════════════════════════════════════════════════ roles
 
@@ -45,8 +50,48 @@ export class UsuarioService {
 
   // ══════════════════════════════════════════════════════════════ usuarios
 
-  async listar(filtros: { rol?: string; activo?: boolean; q?: string } = {}) {
+  /**
+   * Roles sobre los que puede operar quien pregunta.
+   *
+   * El capitán administra **solo meseros**: es quien arma su equipo, no quien
+   * decide la estructura del negocio. Dejarlo tocar capitanes le permitiría
+   * desactivar a un colega en medio de su evento, o darse de alta cómplices con
+   * su mismo nivel de permisos.
+   *
+   * El admin opera sobre todos.
+   */
+  private alcance(rol: string): string[] | null {
+    if (rol === 'admin') return null
+    if (rol === 'capitan') return ['mesero']
+    return []
+  }
+
+  /** Lanza si el objetivo está fuera del alcance de quien pregunta. */
+  private async exigirAlcance(objetivo: Usuario, rolSolicitante: string, uuid: string) {
+    const permitidos = this.alcance(rolSolicitante)
+    if (permitidos === null) return
+
+    await objetivo.load('rol')
+    if (!permitidos.includes(objetivo.rol.nombre)) {
+      throw new SgebError('SGEB-1004', {
+        tecnico:
+          `sub=${uuid} con rol='${rolSolicitante}' intentó operar sobre USUARIO ` +
+          `id=${objetivo.id} de rol='${objetivo.rol.nombre}'. Alcance: ${permitidos.join(', ')}.`,
+      })
+    }
+  }
+
+  async listar(filtros: { rol?: string; activo?: boolean; q?: string; rolSolicitante?: string } = {}) {
     const q = Usuario.query().preload('rol').orderBy('nombre')
+
+    /**
+     * El filtro de alcance se aplica en la consulta, no al serializar: así el
+     * capitán no puede deducir cuántos admins hay comparando conteos.
+     */
+    const permitidos = this.alcance(filtros.rolSolicitante ?? 'admin')
+    if (permitidos !== null) {
+      q.whereIn('id_rol', db.from('rol').select('id_rol').whereIn('nombre', permitidos))
+    }
 
     if (filtros.activo !== undefined) q.where('activo', filtros.activo)
     if (filtros.rol) {
@@ -64,9 +109,18 @@ export class UsuarioService {
     return q
   }
 
-  async obtener(uuid: string): Promise<Usuario> {
+  async obtener(uuid: string, solicitante?: { uuid: string; rol: string }): Promise<Usuario> {
     const u = await Usuario.query().where('uuid_usuario', uuid).preload('rol').first()
     if (!u) throw errores.noEncontrado('USUARIO', uuid)
+
+    /**
+     * Sin solicitante es una lectura interna del propio backend (resolver el
+     * perfil propio, precargar el capitán de un evento). El alcance solo aplica
+     * cuando alguien pregunta por otro.
+     */
+    if (solicitante && solicitante.uuid !== uuid) {
+      await this.exigirAlcance(u, solicitante.rol, solicitante.uuid)
+    }
     return u
   }
 
@@ -81,7 +135,29 @@ export class UsuarioService {
    * Diccionario, y relajarla abriría la puerta a cuentas sin credencial que
    * algún camino olvidado pudiera aceptar.
    */
-  async crear(datos: CrearUsuario, uuidResponsable: string, ip?: string | null): Promise<Usuario> {
+  /**
+   * Alta administrativa **con invitación**.
+   *
+   * ────────────────────────────────────────────────────────────────────────
+   *  POR QUÉ EL ALTA Y LA INVITACIÓN VAN JUNTAS
+   * ────────────────────────────────────────────────────────────────────────
+   * Antes eran dos operaciones independientes y eso producía un callejón sin
+   * salida: `POST /usuarios` creaba la cuenta con un hash imposible, y al
+   * intentar invitar después, la invitación **rechazaba el correo** por
+   * existir ya. La cuenta quedaba viva y sin ninguna forma de activarse.
+   *
+   * Lo detectó el equipo de frontend intentando dar de alta un capitán.
+   *
+   * Ahora es una sola operación: se crea la cuenta y se emite la invitación en
+   * la misma transacción. El usuario define su contraseña en la pantalla del
+   * proveedor, igual que un mesero invitado.
+   */
+  async crear(
+    datos: CrearUsuario,
+    uuidResponsable: string,
+    rolSolicitante: string,
+    ip?: string | null
+  ) {
     const correo = datos.correo.trim().toLowerCase()
 
     const rol = await Rol.find(datos.idRol)
@@ -89,38 +165,46 @@ export class UsuarioService {
       throw new SgebError('SGEB-3002', { tecnico: `id_rol=${datos.idRol} no existe en ROL.` })
     }
 
-    const existente = await Usuario.query().where('correo', correo).first()
-    if (existente) {
-      throw new SgebError('SGEB-2006', {
-        tecnico: `USUARIO.correo='${correo}' ya existe (id=${existente.id}).`,
+    /**
+     * Solo el admin da de alta capitanes y admins. Un capitán que pudiera
+     * crearlos se daría a sí mismo un cómplice con su mismo nivel de permisos.
+     */
+    const permitidos = this.alcance(rolSolicitante)
+    if (permitidos !== null && !permitidos.includes(rol.nombre)) {
+      throw new SgebError('SGEB-1004', {
+        tecnico:
+          `rol='${rolSolicitante}' no puede dar de alta usuarios con rol='${rol.nombre}'. ` +
+          `Alcance: ${permitidos.join(', ')}.`,
       })
     }
 
-    const u = await Usuario.create({
-      uuidUsuario: randomUUID(),
-      idRol: datos.idRol,
+    /**
+     * La cuenta NO se crea aquí. Se delega en el módulo de invitaciones, que la
+     * crea cuando el usuario completa el registro y define su contraseña.
+     *
+     * Crearla antes producía una cuenta viva sin credencial que la invitación
+     * luego rechazaba por correo duplicado: un callejón sin salida.
+     */
+    const emisor = await this.identidad.resolverPorUuid(uuidResponsable)
+
+    const inv = await this.invitaciones.invitar({
+      idEmisor: emisor.id,
+      idRolDestino: datos.idRol,
       nombre: datos.nombre.trim(),
       apellidoPaterno: datos.apellidoPaterno.trim(),
       apellidoMaterno: datos.apellidoMaterno?.trim() || null,
       correo,
-      telefono: datos.telefono?.trim() || null,
-      /** Marcador no verificable: ningún hash Bcrypt empieza así. */
-      passwordHash: '!sin-credencial',
-      biometriaHabilitada: false,
-      activo: true,
     })
 
     await this.bitacora.registrar({
-      tipoEntidad: 'USUARIO',
-      idEntidad: u.id,
+      tipoEntidad: 'INVITACION',
       accion: 'crear',
       uuidResponsable,
-      detalle: `Alta de ${correo} con rol ${rol.nombre}. Pendiente de invitación.`,
+      detalle: `Alta de ${correo} con rol ${rol.nombre} por invitación.`,
       ip,
     })
 
-    await u.load('rol')
-    return u
+    return { correo, rol: rol.nombre, deeplink: inv.deeplink, expira_en: inv.expiraEn }
   }
 
   /** Actualiza datos de perfil. No toca rol, correo ni estado de la cuenta. */
@@ -128,9 +212,10 @@ export class UsuarioService {
     uuid: string,
     datos: Partial<Pick<CrearUsuario, 'nombre' | 'apellidoPaterno' | 'apellidoMaterno' | 'telefono'>>,
     uuidResponsable: string,
+    rolSolicitante: string,
     ip?: string | null
   ): Promise<Usuario> {
-    const u = await this.obtener(uuid)
+    const u = await this.obtener(uuid, { uuid: uuidResponsable, rol: rolSolicitante })
 
     if (datos.nombre) u.nombre = datos.nombre.trim()
     if (datos.apellidoPaterno) u.apellidoPaterno = datos.apellidoPaterno.trim()
@@ -166,8 +251,12 @@ export class UsuarioService {
     uuid: string,
     activo: boolean,
     uuidResponsable: string,
+    rolSolicitante: string,
     ip?: string | null
   ): Promise<Usuario> {
+    /** Alcance antes que nada: un capitán no desactiva a otro capitán. */
+    await this.obtener(uuid, { uuid: uuidResponsable, rol: rolSolicitante })
+
     if (uuid === uuidResponsable) {
       throw new SgebError('SGEB-4022', {
         tecnico: `PATCH /usuarios/${uuid} rechazado: sub del JWT == uuid objetivo.`,
