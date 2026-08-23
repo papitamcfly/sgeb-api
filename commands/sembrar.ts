@@ -51,6 +51,11 @@ export default class Sembrar extends BaseCommand {
   @flags.boolean({ description: 'Borra todos los datos antes de sembrar' })
   declare limpiar: boolean
 
+  @flags.boolean({
+    description: 'Siembra además un segundo evento con la barra en todos sus estados de falla',
+  })
+  declare barra: boolean
+
   async run() {
     const { default: db } = await import('@adonisjs/lucid/services/db')
     const app = this.app
@@ -76,51 +81,90 @@ export default class Sembrar extends BaseCommand {
       { uuid: randomUUID(), rol: 3, nombre: 'Sofía', ap: 'Herrera', correo: 'mesero6@sgeb.mx' },
     ]
 
-    await db.table('usuario').multiInsert(
-      personas.map((p) => ({
+    /**
+     * Uno por uno y saltando los existentes. `multiInsert` fallaba entero si
+     * cualquiera de los nueve correos ya estaba: un usuario previo bastaba para
+     * que el seeder no arrancara.
+     *
+     * Al reutilizar uno existente **se conserva su UUID**, no el generado aquí:
+     * si ya tenía participaciones o pagos, siguen apuntando a la persona
+     * correcta.
+     */
+    const ids: Record<string, number> = {}
+    let nuevos = 0
+    let reusados = 0
+
+    for (const p of personas) {
+      const existente = await this.buscarUsuario(db, p.correo)
+      if (existente) {
+        p.uuid = existente.uuid_usuario
+        ids[p.correo] = existente.id_usuario
+        reusados += 1
+        continue
+      }
+      await db.table('usuario').insert({
         uuid_usuario: p.uuid, id_rol: p.rol, nombre: p.nombre,
         apellido_paterno: p.ap, correo: p.correo, password_hash: hash,
         biometria_habilitada: false, activo: true,
-      }))
-    )
-
-    const ids: Record<string, number> = {}
-    for (const p of personas) {
+      })
       const f = await db.from('usuario').where('uuid_usuario', p.uuid).firstOrFail()
       ids[p.correo] = f.id_usuario
+      nuevos += 1
     }
 
     const meseros = personas.filter((p) => p.rol === 3)
     const CAP = personas[1].uuid
     const CAP2 = personas[2].uuid
 
-    /** CLABE a los primeros cinco meseros: el sexto queda sin ella a propósito. */
-    await db.table('datos_bancarios').multiInsert(
-      meseros.slice(0, 5).map((m, i) => ({
+    /**
+     * CLABE a los primeros cinco: el sexto queda sin ella a propósito, para
+     * poder probar el bloqueo del cierre (SGEB-4012).
+     *
+     * Se salta a quien ya tenga una activa: sobrescribirla borraría el snapshot
+     * contra el que se dispersaron pagos anteriores.
+     */
+    for (const [i, m] of meseros.slice(0, 5).entries()) {
+      const tiene = await db
+        .from('datos_bancarios')
+        .where('id_usuario', ids[m.correo])
+        .where('activo', true)
+        .first()
+      if (tiene) continue
+
+      await db.table('datos_bancarios').insert({
         id_usuario: ids[m.correo], clabe: CLABES[i], banco: 'BBVA',
         titular_cuenta: `${m.nombre} ${m.ap}`, activo: true,
-      }))
+      })
+    }
+
+    this.logger.success(
+      `  ${personas.length} usuarios (${nuevos} nuevos, ${reusados} ya existían)`
     )
-    this.logger.success(`  ${personas.length} usuarios (1 admin, 2 capitanes, 6 meseros)`)
     this.logger.info('    · El mesero6 NO tiene CLABE: sirve para probar SGEB-4012 al cerrar')
 
     // ═══════════════════════════════════════════════════ 2. Salones
     const { default: Salon } = await import('#modules/eventos/models/salon')
+
+    /**
+     * `firstOrCreate` por nombre: el salón no tiene restricción única en la
+     * base, pero dos "Salón Galeana" son la misma cosa para quien los mira, y
+     * acumular copias en cada corrida ensucia el selector del panel.
+     */
     const salones = await Promise.all([
-      Salon.create({
-        nombre: 'Salón Galeana', calle: 'Av. Morelos 1200', cp: '27000',
+      Salon.firstOrCreate({ nombre: 'Salón Galeana' }, {
+        calle: 'Av. Morelos 1200', cp: '27000',
         colonia: 'Centro', ciudad: 'Torreón', estado: 'Coahuila',
         latitud: 25.54389, longitud: -103.40632,
         capacidadMaxMesas: 50, capacidadPersonas: 400, activo: true,
       }),
-      Salon.create({
-        nombre: 'Jardín Las Palmas', calle: 'Blvd. Independencia 3400', cp: '27010',
+      Salon.firstOrCreate({ nombre: 'Jardín Las Palmas' }, {
+        calle: 'Blvd. Independencia 3400', cp: '27010',
         colonia: 'San Isidro', ciudad: 'Torreón', estado: 'Coahuila',
         latitud: 25.55120, longitud: -103.41890,
         capacidadMaxMesas: 30, capacidadPersonas: 250, activo: true,
       }),
-      Salon.create({
-        nombre: 'Terraza Colón', calle: 'Colón 850', cp: '27020',
+      Salon.firstOrCreate({ nombre: 'Terraza Colón' }, {
+        calle: 'Colón 850', cp: '27020',
         colonia: 'Torreón Jardín', ciudad: 'Torreón', estado: 'Coahuila',
         latitud: 25.53200, longitud: -103.43100,
         capacidadMaxMesas: 20, capacidadPersonas: 150, activo: true,
@@ -132,46 +176,87 @@ export default class Sembrar extends BaseCommand {
     const { MenuService } = await import('#modules/menu/services/menu_service')
     const menu = new MenuService()
 
-    const ron = await menu.crearInsumo({ nombre: 'Ron blanco', tipo: 'alcohol', unidad: 'ml', costo: 0.35 })
-    const tequila = await menu.crearInsumo({ nombre: 'Tequila', tipo: 'alcohol', unidad: 'ml', costo: 0.52 })
-    const vodka = await menu.crearInsumo({ nombre: 'Vodka', tipo: 'alcohol', unidad: 'ml', costo: 0.44 })
-    const cola = await menu.crearInsumo({ nombre: 'Refresco de cola', tipo: 'refresco', unidad: 'ml', costo: 0.04 })
-    const toronja = await menu.crearInsumo({ nombre: 'Refresco de toronja', tipo: 'refresco', unidad: 'ml', costo: 0.04 })
-    const naranja = await menu.crearInsumo({ nombre: 'Jugo de naranja', tipo: 'jugo', unidad: 'ml', costo: 0.08 })
-    const agua = await menu.crearInsumo({ nombre: 'Agua mineral', tipo: 'agua', unidad: 'ml', costo: 0.03 })
+    /**
+     * El catálogo se reutiliza por nombre. No tiene restricción única en la
+     * base —dos rones distintos podrían llamarse igual— pero aquí sembrar dos
+     * veces "Ron blanco" solo produce ruido, y las recetas apuntarían a copias.
+     */
+    const insumo = async (
+      nombre: string,
+      tipo: 'alcohol' | 'refresco' | 'jugo' | 'agua' | 'otro',
+      costo: number
+    ) => {
+      const ya = await db.from('insumo').where('nombre', nombre).first()
+      if (ya) return { id: ya.id_insumo as number }
+      return menu.crearInsumo({ nombre, tipo, unidad: 'ml', costo })
+    }
 
-    const vaso = await menu.crearEnvase({ nombre: 'Vaso old fashioned', volumenMl: 350 })
-    const highball = await menu.crearEnvase({ nombre: 'Vaso highball', volumenMl: 470 })
-    await menu.crearEnvase({ nombre: 'Jarra', volumenMl: 1500 })
+    const envaseDe = async (nombre: string, volumenMl: number) => {
+      const ya = await db.from('envase').where('nombre', nombre).first()
+      if (ya) return { id: ya.id_envase as number }
+      return menu.crearEnvase({ nombre, volumenMl })
+    }
+
+    /**
+     * La bebida devuelve además si es nueva: la receta solo se define al
+     * crearla. Redefinirla en cada corrida borraría los ajustes que alguien
+     * haya hecho probando el motor de dispensado.
+     */
+    const bebidaDe = async (nombre: string, descripcion: string, alcoholica: boolean) => {
+      const ya = await db.from('bebida').where('nombre', nombre).first()
+      if (ya) return { id: ya.id_bebida as number, nueva: false }
+      const b = await menu.crearBebida({ nombre, descripcion, alcoholica })
+      return { id: b.id, nueva: true }
+    }
+
+    const ron = await insumo('Ron blanco', 'alcohol', 0.35)
+    const tequila = await insumo('Tequila', 'alcohol', 0.52)
+    const vodka = await insumo('Vodka', 'alcohol', 0.44)
+    const cola = await insumo('Refresco de cola', 'refresco', 0.04)
+    const toronja = await insumo('Refresco de toronja', 'refresco', 0.04)
+    const naranja = await insumo('Jugo de naranja', 'jugo', 0.08)
+    const agua = await insumo('Agua mineral', 'agua', 0.03)
+
+    const vaso = await envaseDe('Vaso old fashioned', 350)
+    const highball = await envaseDe('Vaso highball', 470)
+    await envaseDe('Jarra', 1500)
 
     /**
      * El alcohol es FIJO_ML: si escalara con el envase, la misma cuba saldría
      * casi tres veces más fuerte en jarra sin que nadie lo decidiera.
      */
-    const cuba = await menu.crearBebida({ nombre: 'Cuba libre', descripcion: 'Ron con refresco de cola', alcoholica: true })
-    await menu.definirReceta(cuba.id, [
-      { idInsumo: ron.id, tipoPorcion: 'FIJO_ML', valor: 45, ordenServido: 1 },
-      { idInsumo: cola.id, tipoPorcion: 'RESTO', valor: 0, ordenServido: 2 },
-    ])
+    const cuba = await bebidaDe('Cuba libre', 'Ron con refresco de cola', true)
+    if (cuba.nueva) {
+      await menu.definirReceta(cuba.id, [
+        { idInsumo: ron.id, tipoPorcion: 'FIJO_ML', valor: 45, ordenServido: 1 },
+        { idInsumo: cola.id, tipoPorcion: 'RESTO', valor: 0, ordenServido: 2 },
+      ])
+    }
 
-    const paloma = await menu.crearBebida({ nombre: 'Paloma', descripcion: 'Tequila con toronja', alcoholica: true })
-    await menu.definirReceta(paloma.id, [
-      { idInsumo: tequila.id, tipoPorcion: 'FIJO_ML', valor: 45, ordenServido: 1 },
-      { idInsumo: toronja.id, tipoPorcion: 'RESTO', valor: 0, ordenServido: 2 },
-    ])
+    const paloma = await bebidaDe('Paloma', 'Tequila con toronja', true)
+    if (paloma.nueva) {
+      await menu.definirReceta(paloma.id, [
+        { idInsumo: tequila.id, tipoPorcion: 'FIJO_ML', valor: 45, ordenServido: 1 },
+        { idInsumo: toronja.id, tipoPorcion: 'RESTO', valor: 0, ordenServido: 2 },
+      ])
+    }
 
-    const destornillador = await menu.crearBebida({ nombre: 'Destornillador', descripcion: 'Vodka con naranja', alcoholica: true })
-    await menu.definirReceta(destornillador.id, [
-      { idInsumo: vodka.id, tipoPorcion: 'FIJO_ML', valor: 45, ordenServido: 1 },
-      { idInsumo: naranja.id, tipoPorcion: 'RESTO', valor: 0, ordenServido: 2 },
-    ])
+    const destornillador = await bebidaDe('Destornillador', 'Vodka con naranja', true)
+    if (destornillador.nueva) {
+      await menu.definirReceta(destornillador.id, [
+        { idInsumo: vodka.id, tipoPorcion: 'FIJO_ML', valor: 45, ordenServido: 1 },
+        { idInsumo: naranja.id, tipoPorcion: 'RESTO', valor: 0, ordenServido: 2 },
+      ])
+    }
 
     /** Una sin alcohol, para probar el filtro y el menú de menores. */
-    const naranjada = await menu.crearBebida({ nombre: 'Naranjada mineral', descripcion: 'Sin alcohol', alcoholica: false })
-    await menu.definirReceta(naranjada.id, [
-      { idInsumo: naranja.id, tipoPorcion: 'PROPORCION', valor: 0.4, ordenServido: 1 },
-      { idInsumo: agua.id, tipoPorcion: 'RESTO', valor: 0, ordenServido: 2 },
-    ])
+    const naranjada = await bebidaDe('Naranjada mineral', 'Sin alcohol', false)
+    if (naranjada.nueva) {
+      await menu.definirReceta(naranjada.id, [
+        { idInsumo: naranja.id, tipoPorcion: 'PROPORCION', valor: 0.4, ordenServido: 1 },
+        { idInsumo: agua.id, tipoPorcion: 'RESTO', valor: 0, ordenServido: 2 },
+      ])
+    }
 
     this.logger.success('  7 insumos, 3 envases, 4 bebidas con receta')
 
@@ -179,39 +264,51 @@ export default class Sembrar extends BaseCommand {
     const { ChecklistService } = await import('#modules/checklists/services/checklist_service')
     const checklists = new ChecklistService()
 
-    const clMontaje = await checklists.crear({
-      nombre: 'Montaje de mesa', tipo: 'montaje',
-      items: [
+    /**
+     * La plantilla se reutiliza por nombre. Recrearla en cada corrida dejaría
+     * las instancias históricas apuntando a ítems de una copia anterior, y el
+     * reporte de montaje no podría decir qué se revisó.
+     */
+    const plantilla = async (
+      nombre: string,
+      tipo: 'montaje' | 'servicio' | 'cierre',
+      items: Array<{ descripcion: string; cantidadEsperada: number; orden: number }>
+    ) => {
+      const ya = await db.from('checklist').where('nombre', nombre).first()
+      if (ya) return { id: ya.id_checklist as number }
+      return checklists.crear({ nombre, tipo, items })
+    }
+
+    const clMontaje = await plantilla('Montaje de mesa', 'montaje', [
         { descripcion: 'Mantel planchado y sin manchas', cantidadEsperada: 1, orden: 1 },
         { descripcion: 'Platos base', cantidadEsperada: 10, orden: 2 },
         { descripcion: 'Cubiertos completos', cantidadEsperada: 10, orden: 3 },
         { descripcion: 'Copas de agua', cantidadEsperada: 10, orden: 4 },
         { descripcion: 'Servilletas dobladas', cantidadEsperada: 10, orden: 5 },
         { descripcion: 'Centro de mesa colocado', cantidadEsperada: 1, orden: 6 },
-      ],
-    })
-    await checklists.crear({
-      nombre: 'Revisión de servicio', tipo: 'servicio',
-      items: [
-        { descripcion: 'Charolas limpias', cantidadEsperada: 2, orden: 1 },
-        { descripcion: 'Uniforme completo', cantidadEsperada: 1, orden: 2 },
-      ],
-    })
-    await checklists.crear({
-      nombre: 'Cierre de estación', tipo: 'cierre',
-      items: [
-        { descripcion: 'Loza recogida y contada', cantidadEsperada: 1, orden: 1 },
-        { descripcion: 'Cristalería sin faltantes', cantidadEsperada: 1, orden: 2 },
-        { descripcion: 'Área despejada', cantidadEsperada: 1, orden: 3 },
-      ],
-    })
+    ])
+    await plantilla('Revisión de servicio', 'servicio', [
+      { descripcion: 'Charolas limpias', cantidadEsperada: 2, orden: 1 },
+      { descripcion: 'Uniforme completo', cantidadEsperada: 1, orden: 2 },
+    ])
+    await plantilla('Cierre de estación', 'cierre', [
+      { descripcion: 'Loza recogida y contada', cantidadEsperada: 1, orden: 1 },
+      { descripcion: 'Cristalería sin faltantes', cantidadEsperada: 1, orden: 2 },
+      { descripcion: 'Área despejada', cantidadEsperada: 1, orden: 3 },
+    ])
     this.logger.success('  3 checklists (montaje, servicio, cierre)')
 
     // ═══════════════════════════════════════════════════ 5. Cubaitor
     const { CubaitorService } = await import('#modules/cubaitor/services/cubaitor_service')
     const cub = new CubaitorService()
-    const barra1 = await cub.registrar({ nombre: 'Barra principal', mac: 'AA:BB:CC:DD:EE:01', numPins: 8, hostIp: '10.17.0.20' })
-    const barra2 = await cub.registrar({ nombre: 'Barra terraza', mac: 'AA:BB:CC:DD:EE:02', numPins: 4, hostIp: '10.17.0.21' })
+    /** La MAC sí es UNIQUE en la base: registrar dos veces reventaba. */
+    const dispositivo = async (nombre: string, mac: string, numPins: number, hostIp: string) => {
+      const ya = await db.from('cubaitor').where('mac', mac).first()
+      if (ya) return { id: ya.id_cubaitor as number }
+      return cub.registrar({ nombre, mac, numPins, hostIp })
+    }
+    const barra1 = await dispositivo('Barra principal', 'AA:BB:CC:DD:EE:01', 8, '10.17.0.20')
+    const barra2 = await dispositivo('Barra terraza', 'AA:BB:CC:DD:EE:02', 4, '10.17.0.21')
     this.logger.success('  2 Cubaitores registrados')
 
     // ═══════════════════════════════════════════════════ 6. Eventos
@@ -228,7 +325,22 @@ export default class Sembrar extends BaseCommand {
     const hoy = DateTime.now()
     const f = (d: number) => hoy.plus({ days: d }).toISODate()!
 
+    /**
+     * Los eventos se identifican por título. Es lo que evita que una segunda
+     * corrida duplique todo el árbol: sin esto salían cuatro eventos más, con
+     * sus mesas, participaciones, órdenes y dispensados.
+     *
+     * Si el evento ya existe, se salta el bloque entero — no se intenta
+     * reconciliar su contenido. Reconstruir un evento a medias es peor que
+     * dejarlo como está: alguien pudo haberlo avanzado probando, y sobrescribir
+     * eso borraría justo lo que estaba examinando.
+     */
+    const yaSembrado = async (titulo: string) =>
+      Boolean(await db.from('evento').where('titulo', titulo).first())
+
     // ── 6.1 BORRADOR: editable por completo
+    let creados = 0
+    if (!(await yaSembrado('Cena de fin de año Aceros del Norte'))) {
     const borrador = await eventos.crear(
       {
         idSalon: salones[2].id, uuidCapitan: CAP, titulo: 'Cena de fin de año Aceros del Norte',
@@ -239,8 +351,11 @@ export default class Sembrar extends BaseCommand {
       CAP
     )
     for (let i = 1; i <= 3; i++) await eventos.agregarMesa(borrador.id, { etiqueta: `Mesa ${i}` })
+    creados += 1
+    }
 
     // ── 6.2 PUBLICADO: cupo a medio llenar
+    if (!(await yaSembrado('Boda Hernández–Ruiz'))) {
     const publicado = await eventos.crear(
       {
         idSalon: salones[1].id, uuidCapitan: CAP, titulo: 'Boda Hernández–Ruiz',
@@ -260,8 +375,11 @@ export default class Sembrar extends BaseCommand {
       .where('id_evento', publicado.id).orderBy('id_participacion').firstOrFail()
     await db.from('participacion_evento').where('id_participacion', pSel.id_participacion)
       .update({ estado: 'seleccionado', fecha_seleccion: DateTime.now().toSQL() })
+    creados += 1
+    }
 
     // ── 6.3 EN CURSO: el grande
+    if (!(await yaSembrado('XV años de María Fernanda'))) {
     const enCurso = await eventos.crear(
       {
         idSalon: salones[0].id, uuidCapitan: CAP, titulo: 'XV años de María Fernanda',
@@ -411,6 +529,9 @@ export default class Sembrar extends BaseCommand {
       })
     }
 
+    creados += 1
+    }
+
     // ── 6.4 FINALIZADO: listo para cerrar
     /**
      * Se crea con fecha futura y **después se retrocede por SQL**: el servicio
@@ -420,6 +541,7 @@ export default class Sembrar extends BaseCommand {
      * El seeder sí necesita historia: sin un evento finalizado no hay nada que
      * cerrar, ni reporte de desempeño que mirar.
      */
+    if (!(await yaSembrado('Bautizo Familia Guzmán'))) {
     const finalizado = await eventos.crear(
       {
         idSalon: salones[0].id, uuidCapitan: CAP2, titulo: 'Bautizo Familia Guzmán',
@@ -464,7 +586,148 @@ export default class Sembrar extends BaseCommand {
       ],
     })
 
-    this.logger.success('  4 eventos: borrador, publicado, en curso y finalizado')
+    creados += 1
+    }
+
+    this.logger.success(
+      creados === 4
+        ? '  4 eventos: borrador, publicado, en curso y finalizado'
+        : `  ${creados} eventos nuevos (${4 - creados} ya estaban sembrados)`
+    )
+
+    // ═══════════════════════════════════════════════ 6.5 BARRA EN FALLA
+    /**
+     * Segundo evento en curso, dedicado a los estados de falla del Cubaitor.
+     *
+     * Va aparte y detrás de un flag porque **contamina el evento principal**:
+     * un salón donde la mitad de las botellas están vacías y un dispositivo no
+     * responde no sirve para probar el flujo normal de servicio.
+     *
+     * Aquí se siembran las cuatro cosas que el evento principal no cubre:
+     * botella vacía, insumo sin pin configurado, dispositivo fuera de línea y
+     * dispensado en `error` por falta de reporte.
+     */
+    if (this.barra && !(await yaSembrado('Posada Grupo Lerdo (barra en falla)'))) {
+      const falla = await eventos.crear(
+        {
+          idSalon: salones[1].id, uuidCapitan: CAP, titulo: 'Posada Grupo Lerdo (barra en falla)',
+          tipo: 'empresarial', fecha: hoy.toISODate()!, horaPresentacion: '18:00',
+          inicio: `${hoy.toISODate()}T20:00:00`, cupoMeseros: 4, numMesas: 6,
+          tarifaPorMesero: 880, radioGeocercaM: 180,
+        },
+        CAP
+      )
+      const mesasF = []
+      for (let i = 1; i <= 6; i++) {
+        mesasF.push(await eventos.agregarMesa(falla.id, { etiqueta: `Mesa ${i}` }))
+      }
+      await eventos.cambiarEstado(falla.id, 'publicado')
+
+      const pf = []
+      for (const m of meseros.slice(0, 2)) {
+        const p = await part.apartar(falla.id, m.uuid)
+        await db.from('participacion_evento').where('id_participacion', p.id).update({
+          estado: 'confirmo_llegada', checklist_ok: true,
+          fecha_seleccion: DateTime.now().minus({ hours: 4 }).toSQL(),
+          fecha_confirma_asistencia: DateTime.now().minus({ hours: 3 }).toSQL(),
+          fecha_llegada: DateTime.now().minus({ hours: 1 }).toSQL(),
+        })
+        pf.push(p)
+      }
+      await eventos.cambiarEstado(falla.id, 'en_curso')
+
+      const asigF = await part.asignarMesa(pf[0].id, mesasF[0].id)
+      await part.vincularMesa(asigF.id, mesasF[0].codigoQr, meseros[0].uuid)
+      const asigF2 = await part.asignarMesa(pf[1].id, mesasF[1].id)
+      await part.vincularMesa(asigF2.id, mesasF[1].codigoQr, meseros[1].uuid)
+
+      /**
+       * Barra 2 se registra como el dispositivo del evento y **se deja sin
+       * latir**: `ultima_conexion` retrocede más allá del umbral de 120 s, y el
+       * dashboard lo marca fuera de línea (SGEB-5003).
+       *
+       * El evento NO se bloquea por eso (RNF-13): se sirve a mano.
+       */
+      const cRonF = await cub.configurarPin({
+        idEvento: falla.id, idCubaitor: barra2.id, idInsumo: ron.id,
+        pinGpio: 20, caudalMlSeg: 15.5, volumenCargadoMl: 3000,
+      })
+      const cColaF = await cub.configurarPin({
+        idEvento: falla.id, idCubaitor: barra2.id, idInsumo: cola.id,
+        pinGpio: 21, caudalMlSeg: 25.0, volumenCargadoMl: 8000,
+      })
+      await cub.configurarPin({
+        idEvento: falla.id, idCubaitor: barra2.id, idInsumo: tequila.id,
+        pinGpio: 22, caudalMlSeg: 15.0, volumenCargadoMl: 2000,
+      })
+
+      /**
+       * A la toronja **no se le configura pin** a propósito: pedir una Paloma
+       * aquí responde SGEB-4008, que es distinto de la botella vacía y el
+       * frontend debe distinguirlos.
+       */
+
+      /** Una orden entregada limpia, para que el evento no sea solo fallas. */
+      const oa = await ordenes.crear({
+        idMesa: mesasF[0].id, idParticipacion: pf[0].id,
+        lineas: [{ idBebida: cuba.id, idEnvase: vaso.id, cantidad: 1 }],
+      })
+      const ra = await ordenes.procesarDetalle(oa.detalles[0].id)
+      for (const ins of ra.instrucciones) {
+        await ordenes.reportarDispensado(ins.id_dispensado, ins.segundos)
+      }
+      await ordenes.cambiarEstado(oa.id, 'entregada')
+
+      /**
+       * Un dispensado en **`error`**: el dispositivo abrió la válvula y nunca
+       * reportó (SGEB-5006). Es el estado que faltaba y el más difícil de
+       * reproducir a mano, porque exige que el hardware falle a media apertura.
+       */
+      const ob = await ordenes.crear({
+        idMesa: mesasF[1].id, idParticipacion: pf[1].id,
+        lineas: [{ idBebida: cuba.id, idEnvase: highball.id, cantidad: 1 }],
+      })
+      const rb = await ordenes.procesarDetalle(ob.detalles[0].id)
+      try {
+        await ordenes.reportarDispensado(rb.instrucciones[0].id_dispensado, null)
+      } catch {
+        /**
+         * `reportarDispensado(null)` marca el estado en `error` y **luego
+         * lanza** SGEB-5006, para que quien reporta sepa que la válvula quedó
+         * forzada a cierre. El efecto ya ocurrió: aquí solo se ignora la señal.
+         */
+      }
+
+      /**
+       * Botella vacía: el ron queda en 0 ml. La siguiente orden que lo pida
+       * **no sirve nada** y pausa la orden entera (SGEB-4009) — servir medio
+       * vaso deja una bebida que igual hay que tirar.
+       */
+      await db.from('config_dispensado').where('id_config', cRonF.id)
+        .update({ volumen_disponible_ml: 0 })
+
+      /** El refresco al 8 %: alerta de botella baja sin llegar a vacía. */
+      await db.from('config_dispensado').where('id_config', cColaF.id)
+        .update({ volumen_disponible_ml: 640 })
+
+      /** Una orden que quedará pausada al intentar servirse. */
+      const oc = await ordenes.crear({
+        idMesa: mesasF[0].id, idParticipacion: pf[0].id,
+        lineas: [{ idBebida: cuba.id, idEnvase: vaso.id, cantidad: 2 }],
+      })
+      try {
+        await ordenes.procesarDetalle(oc.detalles[0].id)
+      } catch {
+        /** Se espera SGEB-4009: la orden queda `pausada_por_insumo`. */
+      }
+
+      /** El dispositivo deja de reportar: 10 minutos sin latido. */
+      await db.from('cubaitor').where('id_cubaitor', barra2.id)
+        .update({ ultima_conexion: DateTime.now().minus({ minutes: 10 }).toSQL() })
+
+      this.logger.success('  + evento con la barra en falla (--barra)')
+      this.logger.info('    · ron VACÍO, cola al 8 %, toronja SIN PIN, barra2 fuera de línea')
+    }
 
     // ═══════════════════════════════════════════════════ 7. Resumen
     this.logger.info('')
@@ -477,9 +740,24 @@ export default class Sembrar extends BaseCommand {
     this.logger.info('  capitan2@sgeb.mx   dirige el finalizado')
     this.logger.info('  mesero1..6@sgeb.mx mesero6 SIN CLABE, a propósito')
     this.logger.info('')
-    this.logger.info('  Códigos QR del evento en curso:')
-    for (const m of mesas.slice(0, 3)) {
-      this.logger.info(`    ${m.etiqueta.padEnd(8)} ${m.codigoQr}`)
+    /**
+     * Los QR se consultan de la base, no de las variables locales: así se
+     * imprimen también cuando el evento ya estaba sembrado de una corrida
+     * anterior, que es justo cuando hacen falta y no se tienen a mano.
+     */
+    const qrs = await db
+      .from('mesa as m')
+      .join('evento as e', 'e.id_evento', 'm.id_evento')
+      .where('e.titulo', 'XV años de María Fernanda')
+      .orderBy('m.id_mesa')
+      .limit(3)
+      .select('m.etiqueta', 'm.codigo_qr')
+
+    if (qrs.length > 0) {
+      this.logger.info('  Códigos QR del evento en curso:')
+      for (const m of qrs) {
+        this.logger.info(`    ${String(m.etiqueta).padEnd(8)} ${m.codigo_qr}`)
+      }
     }
     this.logger.info('')
     this.logger.info('  Qué probar sin preparar nada:')
@@ -489,6 +767,27 @@ export default class Sembrar extends BaseCommand {
     this.logger.info('    · Checklist a medias     → participación 3 del evento en curso')
     this.logger.info('    · Hito ya disparado      → ENTRADA del evento en curso')
     this.logger.info('')
+  }
+
+  /**
+   * ────────────────────────────────────────────────────────────────────────
+   *  IDEMPOTENCIA POR CLAVE NATURAL
+   * ────────────────────────────────────────────────────────────────────────
+   * Sin `--limpiar`, el seeder debe **convivir con lo que ya haya**. Antes
+   * hacía `multiInsert` a ciegas y reventaba con `usuario_correo_unique` en
+   * cuanto existía un solo usuario previo — que es el caso normal, porque nadie
+   * borra la base para sembrar.
+   *
+   * Cada bloque se salta lo que ya existe, identificándolo por su clave
+   * natural: el correo del usuario, la MAC del dispositivo, el nombre del
+   * salón o del insumo. No es la llave primaria, pero es lo que hace que dos
+   * filas sean "la misma cosa" para una persona.
+   */
+  private async buscarUsuario(
+    db: Awaited<typeof import('@adonisjs/lucid/services/db')>['default'],
+    correo: string
+  ) {
+    return db.from('usuario').where('correo', correo).first()
   }
 
   /** Hash real de Bcrypt: el login debe funcionar de verdad con estos datos. */

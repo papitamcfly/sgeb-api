@@ -1141,6 +1141,21 @@ Cuatro eventos, uno por estado interesante, para que cada pantalla tenga algo qu
 
 Todas las contrasenas: `Mesero2026`. El hash es Bcrypt real, asi que el login funciona de verdad.
 
+#### Es idempotente: se puede correr sobre una base con datos
+
+Sin `--limpiar`, **convive con lo que ya haya**. Cada bloque se salta lo que existe, identificandolo por su **clave natural**: el correo del usuario, la MAC del dispositivo, el nombre del salon o del insumo, el titulo del evento. No es la llave primaria, pero es lo que hace que dos filas sean "la misma cosa" para una persona.
+
+```
+9 usuarios (8 nuevos, 1 ya existían)
+0 eventos nuevos (4 ya estaban sembrados)
+```
+
+Al reutilizar un usuario **se conserva su UUID**, no el generado en la corrida: si ya tenia participaciones o pagos, siguen apuntando a la persona correcta.
+
+Si el evento ya existe, **se salta el bloque entero** en vez de reconciliar su contenido. Reconstruir un evento a medias es peor que dejarlo: alguien pudo haberlo avanzado probando, y sobrescribir eso borraria justo lo que estaba examinando.
+
+> La primera version hacia `multiInsert` a ciegas y reventaba con `usuario_correo_unique` en cuanto existia un solo usuario previo — que es el caso normal, porque nadie borra la base para sembrar.
+
 #### Los datos pasan por los servicios, no por INSERT
 
 Es mas lento, pero garantiza que lo sembrado respeta las mismas reglas que produce la aplicacion. **Un seeder que inserta a mano puede crear estados imposibles**, y entonces las pruebas manuales validan algo que nunca ocurriria en produccion.
@@ -1164,6 +1179,51 @@ El evento en curso tiene **un mesero en cada estado de la maquina**, para que el
 #### No corre en produccion
 
 Comprueba `app.inProduction` y aborta. `--limpiar` hace TRUNCATE de todo salvo `rol`, que es catalogo del sistema y no dato de prueba.
+
+---
+
+#### Probar la barra en el transcurso del evento
+
+El seeder base deja **fotos fijas**: una orden entregada, otra parcial, una botella baja. Sirve para ver cada pantalla, pero no para probar el transcurso.
+
+```bash
+node ace sembrar --limpiar --barra     # + evento con la barra en falla
+node ace cubaitor:simular --evento=3   # el dispositivo reporta
+```
+
+**`--barra`** siembra un segundo evento en curso con las cuatro cosas que el principal no cubre:
+
+| Situación | Codigo |
+|---|---|
+| Botella VACIA (ron en 0 ml) | SGEB-4009, pausa la orden entera |
+| Insumo SIN PIN configurado (toronja) | SGEB-4008 |
+| Dispositivo fuera de linea (10 min sin latir) | SGEB-5003 |
+| Dispensado en `error` (no reporto) | SGEB-5006 |
+
+Va detras de un flag porque **contamina el evento principal**: un salon donde la mitad de las botellas estan vacias y un dispositivo no responde no sirve para probar el flujo normal.
+
+#### `cubaitor:simular` — el dispositivo que aun no existe
+
+En el evento real el mesero pide, el servidor calcula, el dispositivo abre la valvula y **segundos despues** reporta cuanto duro. Ese hueco temporal es donde vive todo lo interesante: el tablero en "dispensando", el canal empujando `dispensado:cambio`, la botella bajando hasta agotarse.
+
+```bash
+node ace cubaitor:simular --evento=3               # reporta lo pendiente
+node ace cubaitor:simular --evento=3 --fallar=30   # 30 % sale corto o mudo
+node ace cubaitor:simular --evento=3 --seguir      # cada 3 s hasta interrumpir
+node ace cubaitor:simular --evento=3 --latido      # solo el heartbeat
+```
+
+Tres desenlaces, con la proporcion del hardware real:
+
+- **normal** — ±4 % del tiempo calculado. El caudal nunca es exacto
+- **corto** — 60-85 %, queda `parcial`
+- **mudo** — no reporta, queda `error` (SGEB-5006)
+
+**Respeta la latencia** a proposito: sin ella todos los reportes llegan en el mismo milisegundo y el tablero nunca muestra el estado intermedio, que es justo lo que hay que poder ver.
+
+**No hace nada especial**: llama a `reportarDispensado`, el mismo metodo que llamara el puente MQTT. Si esto funciona, aquello funcionara.
+
+> **No existe un estado `pendiente` en DISPENSADO.** La espera se identifica por `segundos_real IS NULL`. Lo descubri escribiendo el simulador, consultando por un estado que no existe.
 
 ---
 
