@@ -28,11 +28,10 @@ export class MqttService {
 
     this.client.on('connect', () => {
       logger.info(`Conectado al broker MQTT en ${url}`)
-      // Suscribirse a los tópicos de telemetría de las válvulas
-      // Ejemplo: sgeb/barra1/valvula1/telemetria
-      this.client?.subscribe('sgeb/+/+/telemetria', { qos: 1 }, (err) => {
+      // Suscribirse a telemetría de válvulas y latido de gateways
+      this.client?.subscribe(['sgeb/+/+/telemetria', 'sgeb/+/gateway/status', 'sgeb/+/heartbeat'], { qos: 1 }, (err) => {
         if (err) logger.error({ err }, 'Error suscribiendo a MQTT')
-        else logger.info('Suscrito a telemetría MQTT (sgeb/+/+/telemetria)')
+        else logger.info('Suscrito a telemetría y status MQTT (sgeb/+/+/telemetria, sgeb/+/gateway/status)')
       })
     })
 
@@ -42,9 +41,22 @@ export class MqttService {
 
     this.client.on('message', async (topic, payload) => {
       try {
+        // 1. Manejo de heartbeat o status del Gateway
+        if (topic.includes('/gateway/status') || topic.includes('/heartbeat')) {
+          const partes = topic.split('/')
+          const mac = partes[1] // ej: "barra1"
+          if (mac) {
+            const { CubaitorService } = await import('#modules/cubaitor/services/cubaitor_service')
+            const cubService = new CubaitorService()
+            await cubService.heartbeat(mac)
+            logger.debug({ mac, topic }, 'Heartbeat de Cubaitor actualizado vía MQTT')
+          }
+          return
+        }
+
         const data = JSON.parse(payload.toString())
         
-        // El dispositivo reporta estado cerrada al terminar de dispensar
+        // 2. El dispositivo reporta estado cerrada al terminar de dispensar
         // {"tipo": "estado", "estado": "cerrada", "causa": "auto_cierre", "ts_ms": 95028, "id": 1042, "ts_apertura_ms": 90026}
         if (data.tipo === 'estado' && data.estado === 'cerrada' && data.id) {
           const segundosReal = (data.ts_ms - data.ts_apertura_ms) / 1000

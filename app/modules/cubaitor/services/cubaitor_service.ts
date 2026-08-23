@@ -111,7 +111,7 @@ export class CubaitorService {
   }
 
   async heartbeat(mac: string) {
-    const c = await Cubaitor.query().where('mac', mac.toUpperCase()).first()
+    const c = await Cubaitor.query().whereILike('mac', mac).first()
     if (!c) throw errores.noEncontrado('CUBAITOR', mac)
 
     c.ultimaConexion = DateTime.now()
