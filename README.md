@@ -1123,6 +1123,50 @@ Apartar es mostrar interes; no ser elegido no es faltar. Solo cuentan `seleccion
 
 ---
 
+### Datos de prueba
+
+```bash
+node ace sembrar              # siembra sobre lo que haya
+node ace sembrar --limpiar    # borra todo primero
+```
+
+Cuatro eventos, uno por estado interesante, para que cada pantalla tenga algo que mostrar sin armarlo a mano.
+
+| Correo | Rol |
+|---|---|
+| `admin@sgeb.mx` | admin |
+| `capitan@sgeb.mx` | dirige borrador, publicado y en curso |
+| `capitan2@sgeb.mx` | dirige el finalizado |
+| `mesero1..6@sgeb.mx` | **mesero6 sin CLABE**, a proposito |
+
+Todas las contrasenas: `Mesero2026`. El hash es Bcrypt real, asi que el login funciona de verdad.
+
+#### Los datos pasan por los servicios, no por INSERT
+
+Es mas lento, pero garantiza que lo sembrado respeta las mismas reglas que produce la aplicacion. **Un seeder que inserta a mano puede crear estados imposibles**, y entonces las pruebas manuales validan algo que nunca ocurriria en produccion.
+
+Lo comprobo al escribirlo: el servicio rechazo crear el evento finalizado con fecha pasada (SGEB-2007). Se crea con fecha futura y **se retrocede por SQL** despues, que es la unica parte donde el seeder toca la base directamente — y esta anotada.
+
+#### Situaciones sembradas a proposito
+
+| Que probar | Donde |
+|---|---|
+| Cierre bloqueado por CLABE (SGEB-4012) | mesero6, si lo agregas al finalizado |
+| Alerta de botella baja | vodka al 4 % en la barra terraza |
+| Dispensado `parcial` | la Paloma de la Mesa 2, al 70 % |
+| Checklist a medias | participacion 3 del evento en curso |
+| Hito ya disparado | ENTRADA del evento en curso |
+| Merma sin costear | plato del evento finalizado |
+| Calificacion baja | una de 2 estrellas, con comentario |
+
+El evento en curso tiene **un mesero en cada estado de la maquina**, para que el panel de asistencia muestre la progresion completa. Y tres asignaciones: dos vinculadas y una sin vincular, que son los tres estados posibles.
+
+#### No corre en produccion
+
+Comprueba `app.inProduction` y aborta. `--limpiar` hace TRUNCATE de todo salvo `rol`, que es catalogo del sistema y no dato de prueba.
+
+---
+
 ## Lo que falta
 
 1. **Correo** para códigos 2FA, invitaciones y recuperación. Hoy el código se escribe en el log fuera de producción (`[DEV] Codigo de verificacion: 123456`), que es lo que permite desarrollar sin servidor de correo.
