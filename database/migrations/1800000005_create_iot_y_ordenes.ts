@@ -18,7 +18,7 @@ export default class extends BaseSchema {
        * Identidad física del ESP32 y llave con la que se anuncia en el broker
        * MQTT. Inmutable: cambiarla equivale a otro dispositivo.
        */
-      table.specificType('mac', 'char(17)').notNullable().unique()
+      table.string('mac', 40).notNullable().unique()
 
       table.string('host_ip', 15).nullable()
       table.smallint('num_pins').notNullable()
