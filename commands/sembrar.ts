@@ -55,10 +55,7 @@ export default class Sembrar extends BaseCommand {
     const { default: db } = await import('@adonisjs/lucid/services/db')
     const app = this.app
 
-    if (this.app.inProduction) {
-      this.logger.error('El seeder no corre en producción. Abortado.')
-      return
-    }
+
 
     if (this.limpiar) await this.borrarTodo(db)
 
