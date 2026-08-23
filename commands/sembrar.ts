@@ -486,10 +486,10 @@ export default class Sembrar extends BaseCommand {
       lineas: [{ idBebida: cuba.id, idEnvase: vaso.id, cantidad: 2 }],
     })
     for (const det of o1.detalles) {
-      const r = await ordenes.procesarDetalle(det.id)
-      for (const ins of r.instrucciones) {
+      const dispensados = await ordenes.procesarDetalle(det.id)
+      for (const ins of dispensados) {
         /** 97 % de lo pedido: dentro de tolerancia, queda `ok`. */
-        await ordenes.reportarDispensado(ins.id_dispensado, Number((ins.segundos * 0.97).toFixed(2)))
+        await ordenes.reportarDispensado(ins.id, Number((ins.segundosCalculado * 0.97).toFixed(2)))
       }
     }
     await ordenes.cambiarEstado(o1.id, 'entregada')
@@ -501,10 +501,10 @@ export default class Sembrar extends BaseCommand {
         { idBebida: naranjada.id, idEnvase: vaso.id, cantidad: 1 },
       ],
     })
-    const r2 = await ordenes.procesarDetalle(o2.detalles[0].id)
+    const dispensados2 = await ordenes.procesarDetalle(o2.detalles[0].id)
     /** 70 %: queda `parcial`, y el mesero debe ver la bebida antes de llevarla. */
-    for (const ins of r2.instrucciones) {
-      await ordenes.reportarDispensado(ins.id_dispensado, Number((ins.segundos * 0.7).toFixed(2)))
+    for (const ins of dispensados2) {
+      await ordenes.reportarDispensado(ins.id, Number((ins.segundosCalculado * 0.7).toFixed(2)))
     }
 
     /** Una recién creada, sin procesar: el tablero la muestra pendiente. */
@@ -673,8 +673,8 @@ export default class Sembrar extends BaseCommand {
         lineas: [{ idBebida: cuba.id, idEnvase: vaso.id, cantidad: 1 }],
       })
       const ra = await ordenes.procesarDetalle(oa.detalles[0].id)
-      for (const ins of ra.instrucciones) {
-        await ordenes.reportarDispensado(ins.id_dispensado, ins.segundos)
+      for (const ins of ra) {
+        await ordenes.reportarDispensado(ins.id, ins.segundosCalculado)
       }
       await ordenes.cambiarEstado(oa.id, 'entregada')
 
@@ -689,7 +689,7 @@ export default class Sembrar extends BaseCommand {
       })
       const rb = await ordenes.procesarDetalle(ob.detalles[0].id)
       try {
-        await ordenes.reportarDispensado(rb.instrucciones[0].id_dispensado, null)
+        await ordenes.reportarDispensado(rb[0].id, null)
       } catch {
         /**
          * `reportarDispensado(null)` marca el estado en `error` y **luego
