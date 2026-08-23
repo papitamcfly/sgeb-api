@@ -87,7 +87,7 @@ export class InvitacionService {
       throw error
     }
 
-    const deeplink = `mx.mediocres.sgeb://registro?token=${token}`
+    const deeplink = `${env.get('APP_URL_PROVEEDOR')}/registro?token=${token}`
     await this.correo.invitacion(correo, datos.nombre, deeplink)
 
     return { token, deeplink, expiraEn }
