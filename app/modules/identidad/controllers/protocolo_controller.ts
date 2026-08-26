@@ -263,15 +263,23 @@ export default class ProtocoloController {
     const idUsuario = await this.sesion.destruir(ctx)
     if (idUsuario) await this.tokens.revocarCadena(idUsuario)
 
+    response.clearCookie('sgeb_refresh', { path: '/token' })
+    response.clearCookie('sso_session', { path: '/' })
+
     const destino = q.post_logout_redirect_uri
-    const cliente = CLIENTES[q.client_id ?? '']
-    if (destino && cliente?.postLogoutRedirectUris.includes(destino)) {
+    const clientId = q.client_id || 'sgeb-web-panel'
+    const cliente = CLIENTES[clientId]
+
+    const destinoNorm = destino ? destino.replace(/\/$/, '') : null
+    const esValido = destinoNorm && cliente?.postLogoutRedirectUris.some((u) => u.replace(/\/$/, '') === destinoNorm)
+
+    if (esValido && destino) {
       const url = new URL(destino)
       if (q.state) url.searchParams.set('state', q.state)
       return redirigir(response, url.toString())
     }
 
-    return response.type('html').send(P.pantallaSesionCerrada())
+    return redirigir(response, 'https://mediocres-inc.online')
   }
 
   /**
