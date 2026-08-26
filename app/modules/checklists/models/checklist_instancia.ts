@@ -27,6 +27,17 @@ export default class ChecklistInstancia extends BaseModel {
   @column.dateTime({ autoCreate: true, autoUpdate: true })
   declare fecha: DateTime
 
+  /**
+   * Aprobación del capitán, persistida para cualquier tipo de checklist.
+   *
+   * Es la fuente de verdad autoritativa: `checklist:cambio` con `aprobado:
+   * true` es solo el aviso en tiempo real, y `PARTICIPACION.checklist_ok` es
+   * un efecto secundario exclusivo del montaje. Ninguno de los dos sobrevive
+   * un reinicio ni sirve para verificar servicio o cierre.
+   */
+  @column.dateTime({ columnName: 'aprobado_en', serializeAs: 'aprobado_en' })
+  declare aprobadoEn: DateTime | null
+
   @hasMany(() => ChecklistRespuesta, { foreignKey: 'idInstancia', localKey: 'id' })
   declare respuestas: HasMany<typeof ChecklistRespuesta>
 }

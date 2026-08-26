@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon'
 import db from '@adonisjs/lucid/services/db'
 import emitter from '@adonisjs/core/services/emitter'
+import type { TransactionClientContract } from '@adonisjs/lucid/types/database'
 import { inject } from '@adonisjs/core'
 import Evento from '#modules/eventos/models/evento'
 import Mesa from '#modules/eventos/models/mesa'
@@ -380,6 +381,19 @@ export class ParticipacionService {
         })
       }
 
+      /**
+       * SGEB-4027: sin checklist de cierre completo Y aprobado no hay salida.
+       *
+       * Autoritativo en backend, no una convención del frontend: el capitán
+       * puede intentar marcar la salida de un mesero cuyo checklist de cierre
+       * nunca se aprobó, y de eso depende que el pago no se calcule sobre un
+       * cierre que nadie verificó (SGEB-4015 ya asume que "salida" implica
+       * cierre verificado).
+       */
+      if (nuevo === 'salida') {
+        await this.verificarChecklistCierre(trx, idParticipacion)
+      }
+
       p.estado = nuevo
       const campo = SELLO[nuevo]
       if (campo) (p as unknown as Record<string, DateTime>)[campo] = DateTime.now()
@@ -395,6 +409,56 @@ export class ParticipacionService {
       })
       return p
     })
+  }
+
+  /**
+   * SGEB-4027: guardia autoritativo para la transición a `salida`.
+   *
+   * Exige un CHECKLIST_INSTANCIA de tipo 'cierre' para esta participación,
+   * completo y con `aprobado_en` marcado. Un checklist de servicio o montaje
+   * no cuenta: cada tipo cubre una etapa distinta, y aceptar cualquiera
+   * dejaría salir a un mesero cuyo cierre nunca se revisó.
+   *
+   * Si hay más de una instancia de cierre (plantillas distintas instanciadas
+   * para la misma participación), se exige que TODAS estén completas y
+   * aprobadas: cualquiera pendiente dice que el cierre no terminó.
+   */
+  private async verificarChecklistCierre(
+    trx: TransactionClientContract,
+    idParticipacion: number
+  ): Promise<void> {
+    const instanciasCierre = await trx
+      .from('checklist_instancia')
+      .join('checklist', 'checklist.id_checklist', 'checklist_instancia.id_checklist')
+      .where('checklist_instancia.id_participacion', idParticipacion)
+      .where('checklist.tipo', 'cierre')
+      .select('checklist_instancia.completado', 'checklist_instancia.aprobado_en')
+
+    if (instanciasCierre.length === 0) {
+      throw new SgebError('SGEB-4027', {
+        tecnico:
+          `PARTICIPACION id=${idParticipacion} sin CHECKLIST_INSTANCIA de tipo 'cierre'. ` +
+          `No se puede registrar salida sin checklist de cierre asignado.`,
+      })
+    }
+
+    const incompletas = instanciasCierre.filter((i) => !i.completado)
+    if (incompletas.length > 0) {
+      throw new SgebError('SGEB-4027', {
+        tecnico:
+          `PARTICIPACION id=${idParticipacion} con ${incompletas.length} CHECKLIST_INSTANCIA ` +
+          `de cierre incompletas. No se puede registrar salida.`,
+      })
+    }
+
+    const sinAprobar = instanciasCierre.filter((i) => !i.aprobado_en)
+    if (sinAprobar.length > 0) {
+      throw new SgebError('SGEB-4027', {
+        tecnico:
+          `PARTICIPACION id=${idParticipacion} con ${sinAprobar.length} CHECKLIST_INSTANCIA ` +
+          `de cierre completas pero sin aprobar. No se puede registrar salida.`,
+      })
+    }
   }
 
   // ══════════════════════════════════════════════════════════ asignaciones

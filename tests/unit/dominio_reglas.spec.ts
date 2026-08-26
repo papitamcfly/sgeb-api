@@ -8,6 +8,7 @@ import testUtils from '@adonisjs/core/services/test_utils'
 import { EventoService } from '#modules/eventos/services/evento_service'
 import { ParticipacionService } from '#modules/participaciones/services/participacion_service'
 import { LlegadaService } from '#modules/participaciones/services/llegada_service'
+import { ChecklistService } from '#modules/checklists/services/checklist_service'
 import Salon from '#modules/eventos/models/salon'
 import ParticipacionEvento from '#modules/participaciones/models/participacion_evento'
 import type { SgebError } from '#shared/errors/sgeb_error'
@@ -378,6 +379,91 @@ test.group('Ciclo de vida del mesero', (group) => {
 
     const estado = await db.from('mesa').where('id_mesa', mesa1.id_mesa).firstOrFail()
     assert.equal(estado.estado, 'ocupada')
+  })
+
+  /** Lleva la participación hasta `vinculo`, lista para intentar la salida. */
+  async function meseroVinculado(evento: { id: number }, part: ParticipacionService) {
+    const mesa = await db.from('mesa').where('id_evento', evento.id).firstOrFail()
+    const p = await part.apartar(evento.id, UUID_MESERO)
+    await db.from('participacion_evento').where('id_participacion', p.id).update({ checklist_ok: true, estado: 'confirmo_llegada' })
+    const a = await part.asignarMesa(p.id, mesa.id_mesa)
+    await part.vincularMesa(a.id, mesa.codigo_qr, UUID_MESERO)
+    return await ParticipacionEvento.findOrFail(p.id)
+  }
+
+  test('SGEB-4027: sin checklist de cierre asignado no hay salida', async ({ assert }) => {
+    const { evento, part } = await escenario()
+    const p = await meseroVinculado(evento, part)
+
+    assert.equal(await codigo(() => part.cambiarEstado(p.id, 'salida')), 'SGEB-4027')
+  })
+
+  test('SGEB-4027: checklist de cierre incompleto no permite la salida', async ({ assert }) => {
+    const { evento, part } = await escenario()
+    const p = await meseroVinculado(evento, part)
+
+    const checklists = await app.container.make(ChecklistService)
+    const c = await checklists.crear({
+      nombre: 'Cierre de turno', tipo: 'cierre',
+      items: [{ descripcion: 'Recoger loza', cantidadEsperada: 5, orden: 1 }],
+    })
+    await checklists.instanciar(p.id, c.id)
+
+    assert.equal(await codigo(() => part.cambiarEstado(p.id, 'salida')), 'SGEB-4027')
+  })
+
+  test('SGEB-4027: checklist de cierre completo pero sin aprobar no permite la salida', async ({ assert }) => {
+    const { evento, part } = await escenario()
+    const p = await meseroVinculado(evento, part)
+
+    const checklists = await app.container.make(ChecklistService)
+    const c = await checklists.crear({
+      nombre: 'Cierre de turno', tipo: 'cierre',
+      items: [{ descripcion: 'Recoger loza', cantidadEsperada: 5, orden: 1 }],
+    })
+    const inst = await checklists.instanciar(p.id, c.id)
+    const item = await db.from('checklist_item').where('id_checklist', c.id).firstOrFail()
+    await checklists.responder(inst.id, [{ idItem: item.id_item, cantidad: 5, hecho: true }], UUID_MESERO)
+
+    /** Completo no basta: falta que el capitán lo apruebe. */
+    assert.equal(await codigo(() => part.cambiarEstado(p.id, 'salida')), 'SGEB-4027')
+  })
+
+  test('cierre completo y aprobado permite la salida', async ({ assert }) => {
+    const { evento, part } = await escenario()
+    const p = await meseroVinculado(evento, part)
+
+    const checklists = await app.container.make(ChecklistService)
+    const c = await checklists.crear({
+      nombre: 'Cierre de turno', tipo: 'cierre',
+      items: [{ descripcion: 'Recoger loza', cantidadEsperada: 5, orden: 1 }],
+    })
+    const inst = await checklists.instanciar(p.id, c.id)
+    const item = await db.from('checklist_item').where('id_checklist', c.id).firstOrFail()
+    await checklists.responder(inst.id, [{ idItem: item.id_item, cantidad: 5, hecho: true }], UUID_MESERO)
+    await checklists.aprobar(inst.id)
+
+    const salida = await part.cambiarEstado(p.id, 'salida')
+    assert.equal(salida.estado, 'salida')
+    assert.isNotNull(salida.fechaSalida)
+  })
+
+  test('SGEB-4027: un checklist de servicio aprobado no sustituye al de cierre', async ({ assert }) => {
+    const { evento, part } = await escenario()
+    const p = await meseroVinculado(evento, part)
+
+    const checklists = await app.container.make(ChecklistService)
+    const servicio = await checklists.crear({
+      nombre: 'Revisión de servicio', tipo: 'servicio',
+      items: [{ descripcion: 'Reponer servilletas', cantidadEsperada: 1, orden: 1 }],
+    })
+    const inst = await checklists.instanciar(p.id, servicio.id)
+    const item = await db.from('checklist_item').where('id_checklist', servicio.id).firstOrFail()
+    await checklists.responder(inst.id, [{ idItem: item.id_item, cantidad: 1, hecho: true }], UUID_MESERO)
+    await checklists.aprobar(inst.id)
+
+    /** Cada tipo cubre una etapa distinta: servicio completo no dice nada del cierre. */
+    assert.equal(await codigo(() => part.cambiarEstado(p.id, 'salida')), 'SGEB-4027')
   })
 
   test('SGEB-4020: el mesero no libera su lugar a última hora', async ({ assert }) => {

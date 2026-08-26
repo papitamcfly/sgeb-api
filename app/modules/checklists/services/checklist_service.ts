@@ -254,7 +254,14 @@ export class ChecklistService {
         })
       }
 
-      if (inst.completado && p.checklistOk) {
+      /**
+       * Antes esto miraba `p.checklistOk`, que solo el montaje enciende: un
+       * cierre o servicio ya aprobado por el capitán se podía reabrir sin
+       * problema, porque `checklist_ok` nunca reflejó su aprobación. Con
+       * `aprobado_en` persistido para los tres tipos, la protección aplica por
+       * igual a los tres.
+       */
+      if (inst.completado && inst.aprobadoEn) {
         throw new SgebError('SGEB-4011', {
           tecnico:
             `CHECKLIST_INSTANCIA id=${idInstancia} ya completada y aprobada por el capitán. ` +
@@ -346,9 +353,19 @@ export class ChecklistService {
         .firstOrFail()
 
       /**
+       * Idempotente: no se pisa la marca de tiempo de una aprobación ya
+       * existente. Reaprobar (doble tap, red que repite la petición) no debe
+       * mover el reloj de cuándo se aprobó de verdad.
+       */
+      if (!inst.aprobadoEn) {
+        inst.aprobadoEn = DateTime.now()
+        await inst.useTransaction(trx).save()
+      }
+
+      /**
        * Solo el de montaje desbloquea la asignación. Los de servicio y cierre
-       * se aprueban igual pero no tocan `checklist_ok`: el de cierre alimenta
-       * el bloqueo de pagos por otra vía.
+       * quedan con `aprobado_en` igual, pero no tocan `checklist_ok`: el de
+       * cierre alimenta el bloqueo de salida por otra vía (SGEB-4027).
        */
       if (plantilla.tipo === 'montaje') {
         p.checklistOk = true

@@ -82,6 +82,7 @@ export const CODIGOS = {
   'SGEB-4024': { http: 422, mensaje: 'Este equipo no está registrado a tu nombre. Regístralo o avisa a tu capitán.' },
   'SGEB-4025': { http: 409, mensaje: 'Este equipo ya se usó para registrar la llegada de otro mesero en este evento.' },
   'SGEB-4026': { http: 422, mensaje: 'No pudimos ubicarte con precisión. Sal a un espacio abierto e inténtalo de nuevo.' },
+  'SGEB-4027': { http: 409, mensaje: 'Antes de registrar la salida, completa y haz que tu capitán apruebe el checklist de cierre.' },
 
   // ---------------------------------------------------------------- 5xxx Técnicos
   'SGEB-5001': { http: 500, mensaje: 'Ocurrió un problema inesperado. Intenta de nuevo en unos minutos.' },
