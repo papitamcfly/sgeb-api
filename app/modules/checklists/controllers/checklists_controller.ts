@@ -54,7 +54,12 @@ export default class ChecklistsController {
   /** El mesero marca sus respuestas. `completado` lo decide el servidor. */
   async responder(ctx: HttpContext) {
     const { respuestas } = await respuestasValidator.validate(ctx.request.body())
-    const r = await this.checklists.responder(ctx.request.param('id_instancia'), respuestas)
+    /** El sujeto sale del token: nadie llena el checklist de otro. */
+    const r = await this.checklists.responder(
+      ctx.request.param('id_instancia'),
+      respuestas,
+      ctx.sujeto.uuid
+    )
 
     return responder.ok(
       ctx,

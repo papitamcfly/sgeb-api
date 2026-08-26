@@ -8,6 +8,8 @@ import ChecklistInstancia from '#modules/checklists/models/checklist_instancia'
 import ChecklistRespuesta from '#modules/checklists/models/checklist_respuesta'
 import ParticipacionEvento from '#modules/participaciones/models/participacion_evento'
 import { SgebError, errores } from '#shared/errors/sgeb_error'
+import { inject } from '@adonisjs/core'
+import { IdentidadService } from '#modules/identidad/identidad_service'
 
 /**
  * Checklists de montaje, servicio y cierre.
@@ -30,7 +32,10 @@ export interface ItemPlantilla {
   orden: number
 }
 
+@inject()
 export class ChecklistService {
+  constructor(private identidad: IdentidadService) {}
+
   // ══════════════════════════════════════════════════════════ plantillas
 
   async listar(tipo?: 'montaje' | 'servicio' | 'cierre') {
@@ -210,10 +215,20 @@ export class ChecklistService {
    * manda el cliente: si la app pudiera declararlo, bastaría con enviar
    * `completado: true` para saltarse el montaje entero.
    */
+  /**
+   * El mesero registra lo que verificó en su mesa.
+   *
+   * `uuidMesero` es obligatorio: sin él, cualquier mesero podía llenar el
+   * checklist de otro y desbloquearle la asignación de mesas sin haber montado
+   * nada. El capitán aprobaría un montaje que su autor nunca revisó.
+   */
   async responder(
     idInstancia: number,
-    respuestas: Array<{ idItem: number; cantidad: number; hecho: boolean }>
+    respuestas: Array<{ idItem: number; cantidad: number; hecho: boolean }>,
+    uuidMesero: string
   ) {
+    const usuario = await this.identidad.resolverPorUuid(uuidMesero)
+
     return db.transaction(async (trx) => {
       const inst = await ChecklistInstancia.query({ client: trx })
         .where('id_instancia', idInstancia)
@@ -229,6 +244,16 @@ export class ChecklistService {
        * aprobado.
        */
       const p = await ParticipacionEvento.findOrFail(inst.idParticipacion, { client: trx })
+
+      /** El checklist es de quien montó la mesa. */
+      if (p.idUsuario !== usuario.id) {
+        throw new SgebError('SGEB-1004', {
+          tecnico:
+            `sub=${uuidMesero} intentó responder la CHECKLIST_INSTANCIA id=${idInstancia}, ` +
+            `que pertenece a la participación ${inst.idParticipacion} de id_usuario=${p.idUsuario}.`,
+        })
+      }
+
       if (inst.completado && p.checklistOk) {
         throw new SgebError('SGEB-4011', {
           tecnico:
