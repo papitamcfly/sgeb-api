@@ -59,10 +59,13 @@ export default class InternoController {
 
   async mostrarLogin({ request, response }: HttpContext) {
     const ticket = request.input('ticket', '')
+    if (!ticket) {
+      return redirigir(response, 'https://mediocres-inc.online')
+    }
     try {
       await this.autorizacion.leerFlujo(ticket)
-    } catch (error) {
-      return this.error(response, error)
+    } catch {
+      return redirigir(response, 'https://mediocres-inc.online')
     }
     return response.type('html').send(P.pantallaLogin({ ticket, siteKey: this.siteKey }))
   }

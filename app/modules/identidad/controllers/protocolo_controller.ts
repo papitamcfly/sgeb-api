@@ -89,6 +89,10 @@ export default class ProtocoloController {
     const { request, response } = ctx
     const q = request.qs()
 
+    if (!q.client_id && !q.redirect_uri) {
+      return redirigir(response, 'https://mediocres-inc.online')
+    }
+
     let cliente
     try {
       cliente = this.autorizacion.validarCliente(q.client_id, q.redirect_uri)

@@ -24,6 +24,9 @@ import { middleware } from './kernel.js'
  * viven bajo el subdominio auth.sgeb.mediocres.mx, con su propio origen, para
  * que la cookie de sesión SSO pertenezca al proveedor y no a la API.
  */
+router.get('/', ({ response }) => response.redirect('https://mediocres-inc.online'))
+router.get('/login', ({ response }) => response.redirect('https://mediocres-inc.online'))
+
 router.get('/.well-known/openid-configuration', '#modules/identidad/controllers/protocolo_controller.descubrimiento')
 router.get('/.well-known/jwks.json', '#modules/identidad/controllers/protocolo_controller.jwks')
 router.get('/authorize', '#modules/identidad/controllers/protocolo_controller.authorize')
