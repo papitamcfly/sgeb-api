@@ -325,6 +325,88 @@ test.group('Correcciones del smoke', (group) => {
     )
   })
 
+  // ══════════════════════════════════ vincular escaneando, sin id interno
+
+  test('el mesero escanea el QR y queda vinculado', async ({ assert }) => {
+    const { mesa, part, participacion } = await escenario()
+    await part.asignarMesa(participacion.id, mesa.id)
+
+    /**
+     * La app solo manda el código que acaba de leer. No conoce
+     * `id_asignacion` ni `id_mesa`: el servidor los resuelve.
+     */
+    const a = await part.vincularPorQr(mesa.codigoQr, UUID_MESERO)
+
+    assert.isTrue(a.vinculada)
+    assert.isNotNull(a.fechaVinculacion)
+    assert.equal((await ParticipacionEvento.findOrFail(participacion.id)).estado, 'vinculo')
+
+    const fila = await db.from('mesa').where('id_mesa', mesa.id).firstOrFail()
+    assert.equal(fila.estado, 'ocupada')
+  })
+
+  test('reescanear no es un error', async ({ assert }) => {
+    const { mesa, part, participacion } = await escenario()
+    await part.asignarMesa(participacion.id, mesa.id)
+
+    /** En el salón el mesero reescanea por accidente a cada rato. */
+    await part.vincularPorQr(mesa.codigoQr, UUID_MESERO)
+    const a = await part.vincularPorQr(mesa.codigoQr, UUID_MESERO)
+    assert.isTrue(a.vinculada)
+  })
+
+  test('SGEB-1004: escanear la mesa de otro mesero', async ({ assert }) => {
+    const { mesa, part, participacion } = await escenario()
+    await part.asignarMesa(participacion.id, mesa.id)
+
+    /**
+     * El QR está impreso y a la vista: sin esta comprobación cualquiera se
+     * vincularía a la mesa ajena y aparecería como responsable de un servicio
+     * que no dio.
+     */
+    assert.equal(
+      await codigo(() => part.vincularPorQr(mesa.codigoQr, UUID_OTRO)),
+      'SGEB-1004'
+    )
+  })
+
+  test('SGEB-4011: escanear una mesa que nadie tiene asignada', async ({ assert }) => {
+    const { mesa2, part } = await escenario()
+
+    /**
+     * No se autoasigna: la asignación es del capitán y pasa por el checklist de
+     * montaje (SGEB-4005). Escanear para autoasignarse saltaría ese control.
+     */
+    assert.equal(
+      await codigo(() => part.vincularPorQr(mesa2.codigoQr, UUID_MESERO)),
+      'SGEB-4011'
+    )
+  })
+
+  test('SGEB-3003: un QR que ya no existe', async ({ assert }) => {
+    const { part } = await escenario()
+
+    /** Caso real: el capitán regeneró el QR y el impreso quedó viejo. */
+    assert.equal(
+      await codigo(() =>
+        part.vincularPorQr('11111111-1111-4111-8111-111111111111', UUID_MESERO)
+      ),
+      'SGEB-3003'
+    )
+  })
+
+  test('no se vincula una asignación ya liberada', async ({ assert }) => {
+    const { mesa, part, participacion } = await escenario()
+    const a = await part.asignarMesa(participacion.id, mesa.id)
+    await part.liberarMesa(a.id)
+
+    /** La mesa quedó sin asignación vigente: se comporta como no asignada. */
+    assert.equal(
+      await codigo(() => part.vincularPorQr(mesa.codigoQr, UUID_MESERO)),
+      'SGEB-4011'
+    )
+  })
+
   // ══════════════════════════════════════════════════ #13 semántica de mesa
 
   test('la mesa sigue libre hasta que el mesero la vincula', async ({ assert }) => {

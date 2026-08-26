@@ -288,6 +288,12 @@ router
         /** El mesero declara que sí va: es él quien lo sabe, no el capitán. */
         router.post('/participaciones/:id_participacion/confirmacion-asistencia', '#modules/participaciones/controllers/participaciones_controller.confirmarAsistencia')
         router.post('/participaciones/:id_participacion/confirmacion-llegada', '#modules/participaciones/controllers/participaciones_controller.confirmarLlegada')
+        /**
+         * El camino de la app: escanear y listo. El servidor resuelve la mesa,
+         * su asignación vigente y si le corresponde a quien escaneó.
+         */
+        router.post('/mesas/vincular', '#modules/participaciones/controllers/participaciones_controller.vincularPorQr')
+        /** Por id de asignación. Lo conserva el panel para corregir a mano. */
         router.patch('/asignaciones/:id_asignacion/vincular', '#modules/participaciones/controllers/participaciones_controller.vincularMesa')
 
         /** Marcar el checklist es del mesero: es quien montó las mesas. */
