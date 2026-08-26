@@ -46,6 +46,8 @@ export class InvitacionService {
     apellidoPaterno: string
     apellidoMaterno?: string | null
     correo: string
+    /** Opcional: hay meseros que se invitan solo por correo. */
+    telefono?: string | null
   }): Promise<{ token: string; deeplink: string; expiraEn: DateTime }> {
     const correo = datos.correo.trim().toLowerCase()
 
@@ -72,6 +74,7 @@ export class InvitacionService {
         apellidoPaterno: datos.apellidoPaterno,
         apellidoMaterno: datos.apellidoMaterno ?? null,
         correo,
+        telefono: datos.telefono?.trim() || null,
         tokenHash: this.hash(token),
         estado: 'pendiente',
         expiraEn,
@@ -175,6 +178,7 @@ export class InvitacionService {
       apellidoPaterno: vieja.apellidoPaterno,
       apellidoMaterno: vieja.apellidoMaterno,
       correo: vieja.correo,
+      telefono: vieja.telefono,
     })
   }
 
@@ -240,6 +244,11 @@ export class InvitacionService {
           apellidoPaterno: inv.apellidoPaterno,
           apellidoMaterno: inv.apellidoMaterno,
           correo: inv.correo,
+          /**
+           * Viene de la invitación: el capitán ya lo conocía. El invitado puede
+           * corregirlo después desde su perfil, pero no tiene que capturarlo.
+           */
+          telefono: inv.telefono,
           passwordHash: await hash.make(datos.password),
           biometriaHabilitada: false,
           activo: true,

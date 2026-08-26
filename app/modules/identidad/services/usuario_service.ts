@@ -194,6 +194,7 @@ export class UsuarioService {
       apellidoPaterno: datos.apellidoPaterno.trim(),
       apellidoMaterno: datos.apellidoMaterno?.trim() || null,
       correo,
+      telefono: datos.telefono?.trim() || null,
     })
 
     await this.bitacora.registrar({

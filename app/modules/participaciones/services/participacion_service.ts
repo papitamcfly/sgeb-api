@@ -279,6 +279,79 @@ export class ParticipacionService {
   }
 
   /** Transición de estado con su sello de fecha (SGEB-4011). */
+  /**
+   * El mesero confirma que sí va al evento (`seleccionado` → `confirmo_asistencia`).
+   *
+   * ────────────────────────────────────────────────────────────────────────
+   *  POR QUÉ ES UN ENDPOINT PROPIO Y NO `PATCH /estado`
+   * ────────────────────────────────────────────────────────────────────────
+   * `cambiarEstado` vive en el bloque de capitán y admin, y **debe seguir
+   * ahí**: la transición `aparto → seleccionado` es la selección del equipo, y
+   * un mesero que pudiera invocarla se seleccionaría a sí mismo.
+   *
+   * Pero confirmar la asistencia es del mesero: es él quien sabe si va. Antes
+   * no tenía forma de hacerlo — la única ruta era la del capitán— y el flujo se
+   * quedaba trabado en `seleccionado`.
+   *
+   * Es el mismo reparto que la confirmación de llegada, que ya tenía su ruta
+   * propia con verificación de pertenencia.
+   */
+  async confirmarAsistencia(idParticipacion: number, uuidUsuario: string) {
+    const usuario = await this.identidad.resolverPorUuid(uuidUsuario)
+
+    const r = await db.transaction(async (trx) => {
+      const p = await ParticipacionEvento.query({ client: trx })
+        .where('id_participacion', idParticipacion)
+        .forUpdate()
+        .first()
+
+      if (!p) throw errores.noEncontrado('PARTICIPACION_EVENTO', idParticipacion)
+
+      /** Nadie confirma la asistencia de otro: es una declaración personal. */
+      if (p.idUsuario !== usuario.id) {
+        throw new SgebError('SGEB-1004', {
+          tecnico:
+            `sub=${uuidUsuario} intentó confirmar la asistencia de la participación ` +
+            `${idParticipacion}, que pertenece a id_usuario=${p.idUsuario}.`,
+        })
+      }
+
+      /**
+       * Idempotente: el mesero pulsa dos veces o la red repite la petición, y
+       * eso no debe responder error. Solo se rechaza desde un estado del que
+       * confirmar no tiene sentido.
+       */
+      if (p.estado === 'confirmo_asistencia') return { p, idEvento: p.idEvento }
+
+      if (p.estado !== 'seleccionado') {
+        throw errores.transicionInvalida(
+          'PARTICIPACION_EVENTO', idParticipacion, p.estado, 'confirmo_asistencia'
+        )
+      }
+
+      const evento = await Evento.findOrFail(p.idEvento, { client: trx })
+      if (['finalizado', 'cancelado'].includes(evento.estado)) {
+        throw new SgebError('SGEB-4013', {
+          tecnico: `EVENTO id=${evento.id} estado='${evento.estado}'. No admite confirmaciones.`,
+        })
+      }
+
+      p.estado = 'confirmo_asistencia'
+      p.fechaConfirmaAsistencia = DateTime.now()
+      await p.useTransaction(trx).save()
+
+      return { p, idEvento: p.idEvento }
+    })
+
+    emitter.emit('participacion:cambio', {
+      idEvento: r.idEvento,
+      idParticipacion: r.p.id,
+      estado: r.p.estado,
+    })
+
+    return r.p
+  }
+
   async cambiarEstado(
     idParticipacion: number,
     nuevo: ParticipacionEstado
