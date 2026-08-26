@@ -94,6 +94,19 @@ export default class ParticipacionesController {
     return responder.creado(ctx, a)
   }
 
+  /**
+   * El mesero escanea el QR de la mesa y queda vinculado.
+   *
+   * Es el camino que usa la app: no necesita conocer ningún identificador
+   * interno, solo el código que acaba de leer. El servidor resuelve la mesa, su
+   * asignación vigente y si le corresponde a quien escaneó.
+   */
+  async vincularPorQr(ctx: HttpContext) {
+    const { codigoQr } = await vincularValidator.validate(ctx.request.body())
+    const a = await this.servicio.vincularPorQr(codigoQr, ctx.sujeto.uuid)
+    return responder.ok(ctx, a, 'Mesa vinculada.')
+  }
+
   async vincularMesa(ctx: HttpContext) {
     const { codigoQr } = await vincularValidator.validate(ctx.request.body())
     const a = await this.servicio.vincularMesa(

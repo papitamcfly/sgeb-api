@@ -535,6 +535,115 @@ export class ParticipacionService {
    * vincular la asignación de otro y aparecer como responsable de una mesa que
    * no le tocaba. El QR está impreso en la mesa, a la vista de todos.
    */
+  /**
+   * ═══════════════════════════════════════════════════════════════════════
+   *  VINCULAR ESCANEANDO — el camino que usa la app
+   * ═══════════════════════════════════════════════════════════════════════
+   *
+   * El mesero escanea el QR pegado en la mesa y queda vinculado. **Nada más.**
+   *
+   * El servidor resuelve todo lo demás: qué mesa es ese código, qué asignación
+   * vigente tiene, y si le corresponde a quien escaneó. La app no necesita
+   * conocer ningún identificador interno.
+   *
+   * Existía ya `vincularMesa(idAsignacion, ...)`, que obliga al cliente a
+   * averiguar el `id_asignacion` antes de escanear. Eso invierte el flujo real:
+   * el mesero llega a la mesa, escanea, y recién entonces el sistema debería
+   * saber de qué mesa se trata.
+   *
+   * **No asigna.** Si nadie tiene esa mesa asignada, se rechaza en vez de
+   * asignarla sola: la asignación es del capitán y pasa por el checklist de
+   * montaje (SGEB-4005). Escanear para autoasignarse saltaría ese control.
+   */
+  async vincularPorQr(codigoQr: string, uuidMesero: string): Promise<AsignacionMesa> {
+    const usuario = await this.identidad.resolverPorUuid(uuidMesero)
+
+    const r = await db.transaction(async (trx) => {
+      const mesa = await Mesa.query({ client: trx }).where('codigo_qr', codigoQr).first()
+
+      /**
+       * Un código que no existe es casi siempre un QR viejo: el capitán lo
+       * regeneró y el impreso quedó obsoleto. El mensaje debe orientar hacia
+       * ahí, no hacia un error genérico.
+       */
+      if (!mesa) {
+        throw new SgebError('SGEB-3003', {
+          tecnico:
+            `codigo_qr='${codigoQr}' no corresponde a ninguna MESA. ` +
+            `Probablemente el QR fue regenerado y el impreso está desactualizado.`,
+        })
+      }
+
+      const a = await AsignacionMesa.query({ client: trx })
+        .where('id_mesa', mesa.id)
+        .where('activa', true)
+        .forUpdate()
+        .first()
+
+      if (!a) {
+        throw new SgebError('SGEB-4011', {
+          tecnico:
+            `MESA id=${mesa.id} ('${mesa.etiqueta}') sin asignación vigente. ` +
+            `El capitán todavía no la asignó a nadie.`,
+        })
+      }
+
+      const p = await ParticipacionEvento.query({ client: trx })
+        .where('id_participacion', a.idParticipacion)
+        .forUpdate()
+        .firstOrFail()
+
+      /**
+       * El QR está impreso y a la vista de todos: sin esta comprobación,
+       * cualquier mesero podría vincularse a la mesa de otro y aparecer como
+       * responsable de un servicio que no dio.
+       */
+      if (p.idUsuario !== usuario.id) {
+        throw new SgebError('SGEB-1004', {
+          tecnico:
+            `sub=${uuidMesero} escaneó la MESA id=${mesa.id} ('${mesa.etiqueta}'), ` +
+            `asignada a la participación ${a.id} de id_usuario=${p.idUsuario}.`,
+        })
+      }
+
+      /** Reescanear por accidente pasa a cada rato en el salón: no es un error. */
+      if (a.vinculada) {
+        return { asignacion: a, idEvento: mesa.idEvento, idParticipacion: p.id, estado: p.estado, yaEstaba: true }
+      }
+
+      a.vinculada = true
+      a.fechaVinculacion = DateTime.now()
+      await a.useTransaction(trx).save()
+
+      mesa.estado = 'ocupada'
+      await mesa.useTransaction(trx).save()
+
+      if (p.estado === 'asignado') {
+        p.estado = 'vinculo'
+        await p.useTransaction(trx).save()
+      }
+
+      return { asignacion: a, idEvento: mesa.idEvento, idParticipacion: p.id, estado: p.estado, yaEstaba: false }
+    })
+
+    if (!r.yaEstaba) {
+      emitter.emit('mesa:cambio', {
+        idEvento: r.idEvento,
+        idMesa: r.asignacion.idMesa,
+        estado: 'ocupada',
+        idParticipacion: r.idParticipacion,
+        vinculada: true,
+      })
+      emitter.emit('participacion:cambio', {
+        idEvento: r.idEvento,
+        idParticipacion: r.idParticipacion,
+        estado: r.estado,
+      })
+    }
+
+    return r.asignacion
+  }
+
   async vincularMesa(
     idAsignacion: number,
     codigoQr: string,
