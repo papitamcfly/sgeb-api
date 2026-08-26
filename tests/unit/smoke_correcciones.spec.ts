@@ -68,6 +68,55 @@ test.group('Correcciones del smoke', (group) => {
     return { evento: e, salon: sa, mesa: m1, mesa2: m2, part, eventos, participacion: p }
   }
 
+  // ══════════════════════════════════ el mesero confirma su propia asistencia
+
+  test('el mesero confirma su asistencia sin pasar por el capitán', async ({ assert }) => {
+    const { evento, part } = await escenario()
+
+    const p = await part.apartar(evento.id, UUID_OTRO)
+    await db.from('participacion_evento').where('id_participacion', p.id)
+      .update({ estado: 'seleccionado' })
+
+    /**
+     * Antes la única ruta era `PATCH /estado`, que vive en el bloque del
+     * capitán: el mesero no tenía forma de confirmar y el flujo se quedaba
+     * trabado en `seleccionado`.
+     */
+    const r = await part.confirmarAsistencia(p.id, UUID_OTRO)
+    assert.equal(r.estado, 'confirmo_asistencia')
+    assert.isNotNull(r.fechaConfirmaAsistencia)
+  })
+
+  test('confirmar asistencia es idempotente', async ({ assert }) => {
+    const { evento, part } = await escenario()
+    const p = await part.apartar(evento.id, UUID_OTRO)
+    await db.from('participacion_evento').where('id_participacion', p.id)
+      .update({ estado: 'seleccionado' })
+
+    /** Doble pulsación o reintento de red: no debe responder error. */
+    await part.confirmarAsistencia(p.id, UUID_OTRO)
+    const r = await part.confirmarAsistencia(p.id, UUID_OTRO)
+    assert.equal(r.estado, 'confirmo_asistencia')
+  })
+
+  test('SGEB-1004: nadie confirma la asistencia de otro', async ({ assert }) => {
+    const { evento, part } = await escenario()
+    const p = await part.apartar(evento.id, UUID_OTRO)
+    await db.from('participacion_evento').where('id_participacion', p.id)
+      .update({ estado: 'seleccionado' })
+
+    /** Es una declaración personal: el capitán no puede darla por hecha. */
+    assert.equal(await codigo(() => part.confirmarAsistencia(p.id, UUID_MESERO)), 'SGEB-1004')
+  })
+
+  test('no se confirma asistencia desde un estado que no la admite', async ({ assert }) => {
+    const { evento, part } = await escenario()
+    const p = await part.apartar(evento.id, UUID_OTRO)
+
+    /** En `aparto` todavía no lo han seleccionado: no hay nada que confirmar. */
+    assert.equal(await codigo(() => part.confirmarAsistencia(p.id, UUID_OTRO)), 'SGEB-4011')
+  })
+
   // ══════════════════════════════════════════════════ #6 shape del PATCH
 
   test('PATCH /estado devuelve el mismo shape que obtener', async ({ assert }) => {

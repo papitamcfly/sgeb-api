@@ -106,6 +106,35 @@ test.group('Invitaciones', (group) => {
     assert.isString(capitan.deeplink)
   })
 
+  test('el teléfono viaja de la invitación a la cuenta', async ({ assert }) => {
+    const { cap, servicio } = await escenario()
+
+    /**
+     * El capitán ya conoce el teléfono cuando invita: es como consiguió a la
+     * persona. Sin esto la cuenta nacía sin él y el mesero tenía que capturarlo
+     * después, cosa que nadie hace hasta que alguien necesita llamarle a media
+     * fiesta.
+     */
+    const r = await servicio.invitar({ ...nueva(), idEmisor: cap.id, telefono: '8711234567' })
+
+    const inv = await servicio.leer(r.token)
+    assert.equal(inv.telefono, '8711234567')
+
+    await servicio.registrar({
+      token: r.token, password: 'Mesero2026', password2: 'Mesero2026',
+      clabe: CLABE, banco: 'BBVA', titular: 'Ana Lopez', aceptaPrivacidad: true,
+    })
+
+    const cuenta = await db.from('usuario').where('correo', 'ana@x.mx').firstOrFail()
+    assert.equal(cuenta.telefono, '8711234567')
+  })
+
+  test('el teléfono es opcional', async ({ assert }) => {
+    const { cap, servicio } = await escenario()
+    const r = await servicio.invitar({ ...nueva('sin@x.mx'), idEmisor: cap.id })
+    assert.isNull((await servicio.leer(r.token)).telefono)
+  })
+
   test('el listado NUNCA devuelve el token', async ({ assert }) => {
     const { cap, servicio } = await escenario()
     await servicio.invitar({ ...nueva(), idEmisor: cap.id })

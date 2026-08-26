@@ -17,6 +17,8 @@ const crearValidator = vine.compile(
     apellidoPaterno: vine.string().trim().regex(NOMBRE),
     apellidoMaterno: vine.string().trim().regex(NOMBRE).nullable().optional(),
     correo: vine.string().trim().email().maxLength(100),
+    /** Opcional: hay meseros que se invitan solo por correo. */
+    telefono: vine.string().trim().regex(/^\+?[0-9]{10,15}$/).nullable().optional(),
   })
 )
 

@@ -518,7 +518,7 @@ export class IntentoLoginSchema extends BaseModel {
 }
 
 export class InvitacionSchema extends BaseModel {
-  static $columns = ['apellidoMaterno', 'apellidoPaterno', 'correo', 'creadoEn', 'estado', 'expiraEn', 'idEmisor', 'idInvitacion', 'idRolDestino', 'idUsuarioCreado', 'nombre', 'tokenHash', 'usadaEn'] as const
+  static $columns = ['apellidoMaterno', 'apellidoPaterno', 'correo', 'creadoEn', 'estado', 'expiraEn', 'idEmisor', 'idInvitacion', 'idRolDestino', 'idUsuarioCreado', 'nombre', 'telefono', 'tokenHash', 'usadaEn'] as const
   $columns = InvitacionSchema.$columns
   @column()
   declare apellidoMaterno: string | null
@@ -542,6 +542,8 @@ export class InvitacionSchema extends BaseModel {
   declare idUsuarioCreado: number | null
   @column()
   declare nombre: string
+  @column()
+  declare telefono: string | null
   @column()
   declare tokenHash: string
   @column.dateTime()

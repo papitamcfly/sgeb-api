@@ -40,6 +40,18 @@ export default class ParticipacionesController {
     return responder.ok(ctx, null, `PARTICIPACION id=${ctx.request.param('id_participacion')} liberada por el mesero (RF-14).`)
   }
 
+  /**
+   * El mesero confirma que sí va. El sujeto sale del token: nadie confirma por
+   * otro.
+   */
+  async confirmarAsistencia(ctx: HttpContext) {
+    const p = await this.servicio.confirmarAsistencia(
+      ctx.request.param('id_participacion'),
+      ctx.sujeto.uuid
+    )
+    return responder.ok(ctx, p)
+  }
+
   async cambiarEstado(ctx: HttpContext) {
     const { estado } = await estadoParticipacionValidator.validate(ctx.request.body())
     const p = await this.servicio.cambiarEstado(ctx.request.param('id_participacion'), estado)

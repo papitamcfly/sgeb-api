@@ -25,6 +25,13 @@ export default class Invitacion extends BaseModel {
   @column()
   declare correo: string
 
+  /**
+   * Lo captura el capitán al invitar: ya lo conoce, es como consiguió a la
+   * persona. Se copia a USUARIO al completar el registro.
+   */
+  @column()
+  declare telefono: string | null
+
   @column({ columnName: 'token_hash', serializeAs: null })
   declare tokenHash: string
 

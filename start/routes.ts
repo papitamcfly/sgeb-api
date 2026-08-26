@@ -279,6 +279,8 @@ router
       .group(() => {
         router.post('/eventos/:id_evento/participaciones', '#modules/participaciones/controllers/participaciones_controller.apartar')
         router.delete('/participaciones/:id_participacion', '#modules/participaciones/controllers/participaciones_controller.liberar')
+        /** El mesero declara que sí va: es él quien lo sabe, no el capitán. */
+        router.post('/participaciones/:id_participacion/confirmacion-asistencia', '#modules/participaciones/controllers/participaciones_controller.confirmarAsistencia')
         router.post('/participaciones/:id_participacion/confirmacion-llegada', '#modules/participaciones/controllers/participaciones_controller.confirmarLlegada')
         router.patch('/asignaciones/:id_asignacion/vincular', '#modules/participaciones/controllers/participaciones_controller.vincularMesa')
 
