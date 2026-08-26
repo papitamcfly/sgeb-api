@@ -8,6 +8,8 @@ import { inject } from '@adonisjs/core'
 import { SsoError } from '#modules/identidad/errores_sso'
 import { errores } from '#shared/errors/sgeb_error'
 import { CorreoService } from '#shared/services/correo_service'
+import env from '#start/env'
+
 import logger from '@adonisjs/core/services/logger'
 
 const HORAS_VIGENCIA = 72
