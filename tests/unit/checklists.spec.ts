@@ -359,6 +359,88 @@ test.group('Checklists', (group) => {
     assert.lengthOf(vinculadas, 1)
   })
 
+  // ══════════════════════════════════════════════════════════ aprobación persistida
+
+  test('SGEB-4005: no se aprueba un cierre incompleto', async ({ assert }) => {
+    const { checklists, participacion } = await escenario()
+    const c = await checklists.crear({
+      nombre: 'Cierre de turno', tipo: 'cierre',
+      items: [{ descripcion: 'Recoger loza', cantidadEsperada: 5, orden: 1 }],
+    })
+    const inst = await checklists.instanciar(participacion.id, c.id)
+
+    assert.equal(await codigo(() => checklists.aprobar(inst.id)), 'SGEB-4005')
+  })
+
+  test('aprobar un cierre persiste `aprobado_en` sin tocar `checklist_ok`', async ({ assert }) => {
+    const { checklists, participacion } = await escenario()
+    const c = await checklists.crear({
+      nombre: 'Cierre de turno', tipo: 'cierre',
+      items: [{ descripcion: 'Recoger loza', cantidadEsperada: 5, orden: 1 }],
+    })
+    const inst = await checklists.instanciar(participacion.id, c.id)
+    const item = await db.from('checklist_item').where('id_checklist', c.id).firstOrFail()
+
+    await checklists.responder(inst.id, [{ idItem: item.id_item, cantidad: 5, hecho: true }], UUID_MESERO)
+
+    const antes = await db.from('checklist_instancia').where('id_instancia', inst.id).firstOrFail()
+    assert.isNull(antes.aprobado_en)
+
+    await checklists.aprobar(inst.id)
+
+    /**
+     * `aprobado_en` es la fuente de verdad persistida: sobrevive a un
+     * re-fetch, a diferencia del aviso `aprobado: true` de `checklist:cambio`
+     * (que no deja rastro) o de `checklist_ok` (que el cierre nunca toca).
+     */
+    const despues = await db.from('checklist_instancia').where('id_instancia', inst.id).firstOrFail()
+    assert.isNotNull(despues.aprobado_en)
+    assert.isFalse((await ParticipacionEvento.findOrFail(participacion.id)).checklistOk)
+  })
+
+  test('reaprobar un cierre es idempotente: no mueve `aprobado_en`', async ({ assert }) => {
+    const { checklists, participacion } = await escenario()
+    const c = await checklists.crear({
+      nombre: 'Cierre de turno', tipo: 'cierre',
+      items: [{ descripcion: 'Recoger loza', cantidadEsperada: 5, orden: 1 }],
+    })
+    const inst = await checklists.instanciar(participacion.id, c.id)
+    const item = await db.from('checklist_item').where('id_checklist', c.id).firstOrFail()
+    await checklists.responder(inst.id, [{ idItem: item.id_item, cantidad: 5, hecho: true }], UUID_MESERO)
+
+    await checklists.aprobar(inst.id)
+    const primera = await db.from('checklist_instancia').where('id_instancia', inst.id).firstOrFail()
+
+    await checklists.aprobar(inst.id)
+    const segunda = await db.from('checklist_instancia').where('id_instancia', inst.id).firstOrFail()
+
+    assert.equal(new Date(primera.aprobado_en).getTime(), new Date(segunda.aprobado_en).getTime())
+  })
+
+  test('un cierre ya aprobado tampoco se reabre', async ({ assert }) => {
+    const { checklists, participacion } = await escenario()
+    const c = await checklists.crear({
+      nombre: 'Cierre de turno', tipo: 'cierre',
+      items: [{ descripcion: 'Recoger loza', cantidadEsperada: 5, orden: 1 }],
+    })
+    const inst = await checklists.instanciar(participacion.id, c.id)
+    const item = await db.from('checklist_item').where('id_checklist', c.id).firstOrFail()
+    await checklists.responder(inst.id, [{ idItem: item.id_item, cantidad: 5, hecho: true }], UUID_MESERO)
+    await checklists.aprobar(inst.id)
+
+    /**
+     * Antes de persistir `aprobado_en` para todos los tipos, este guard solo
+     * miraba `checklist_ok` (exclusivo de montaje): un cierre aprobado se
+     * podía reabrir sin que nada lo impidiera.
+     */
+    assert.equal(
+      await codigo(() =>
+        checklists.responder(inst.id, [{ idItem: item.id_item, cantidad: 0, hecho: false }], UUID_MESERO)
+      ),
+      'SGEB-4011'
+    )
+  })
+
   test('desmarcar un ítem antes de aprobar vuelve la instancia a incompleta', async ({ assert }) => {
     const { checklists, participacion } = await escenario()
     const c = await checklists.crear({ nombre: 'Montaje', tipo: 'montaje', items: ITEMS_MONTAJE })

@@ -97,8 +97,10 @@ export class ChecklistSchema extends BaseModel {
 }
 
 export class ChecklistInstanciaSchema extends BaseModel {
-  static $columns = ['completado', 'fecha', 'idChecklist', 'idInstancia', 'idParticipacion'] as const
+  static $columns = ['aprobadoEn', 'completado', 'fecha', 'idChecklist', 'idInstancia', 'idParticipacion'] as const
   $columns = ChecklistInstanciaSchema.$columns
+  @column.dateTime()
+  declare aprobadoEn: DateTime | null
   @column()
   declare completado: boolean
   @column.dateTime()
