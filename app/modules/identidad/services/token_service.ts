@@ -1,4 +1,5 @@
 import { DateTime } from 'luxon'
+import type { TransactionClientContract } from '@adonisjs/lucid/types/database'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { SignJWT, importPKCS8 } from 'jose'
 import db from '@adonisjs/lucid/services/db'
@@ -88,6 +89,21 @@ export class TokenService {
     idPadre?: number | null
     ip?: string | null
     userAgent?: string | null
+    /**
+     * Transacción del llamador. **Obligatoria cuando `idPadre` viene definido.**
+     *
+     * `REFRESH_TOKEN.id_padre` es una llave foránea a la propia tabla. Si el
+     * INSERT del token nuevo corre en otra conexión mientras `rotar()` mantiene
+     * un `FOR UPDATE` sobre la fila padre, PostgreSQL necesita un `FOR KEY
+     * SHARE` sobre esa misma fila para validar la llave foránea — y ese lock
+     * choca con el `FOR UPDATE`.
+     *
+     * El resultado es un bloqueo que la base **no detecta como interbloqueo**:
+     * ve al INSERT esperando a una transacción que, desde su punto de vista,
+     * está simplemente inactiva. La petición se queda colgada hasta que algún
+     * temporizador de red la corta.
+     */
+    trx?: TransactionClientContract
   }): Promise<TokensEmitidos> {
     const { usuario, rol, cliente, scope, sid } = opciones
 
@@ -127,7 +143,8 @@ export class TokenService {
     )
 
     const refreshClaro = randomBytes(32).toString('base64url')
-    await RefreshToken.create({
+    await RefreshToken.create(
+      {
       idUsuario: usuario.id,
       idDispositivo: opciones.idDispositivo ?? null,
       tokenHash: this.hash(refreshClaro),
@@ -138,7 +155,9 @@ export class TokenService {
       userAgent: opciones.userAgent ?? null,
       expiraEn: DateTime.now().plus({ seconds: VIGENCIA_REFRESH[cliente] }),
       revocado: false,
-    })
+      },
+      opciones.trx ? { client: opciones.trx } : {}
+    )
 
     return {
       access_token: accessToken,
@@ -254,6 +273,7 @@ export class TokenService {
         idPadre: fila.id,
         ip: opciones.ip,
         userAgent: opciones.userAgent,
+        trx,
       })
       })
     } finally {

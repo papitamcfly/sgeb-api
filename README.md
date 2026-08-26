@@ -1227,6 +1227,30 @@ Tres desenlaces, con la proporcion del hardware real:
 
 ---
 
+### Un candado que las pruebas no podian ver
+
+`POST /token` con `grant_type=refresh_token` se colgaba en produccion hasta que un temporizador de red cortaba la peticion. Las 341 pruebas pasaban.
+
+**La causa.** `rotar()` mantiene un `FOR UPDATE` sobre la fila del refresh mientras `emitir()` inserta el token nuevo. `emitir()` abria su **propia conexion**, y como `REFRESH_TOKEN.id_padre` es una llave foranea a la misma tabla, ese INSERT necesitaba un `FOR KEY SHARE` sobre la fila ya bloqueada.
+
+PostgreSQL **no lo reporta como interbloqueo**: ve al INSERT esperando a una transaccion que, desde su punto de vista, esta inactiva. Nadie aborta nada. La peticion espera para siempre.
+
+**La correccion** es una linea: pasar `trx` a `emitir()`.
+
+#### Por que la suite no lo encontraba
+
+Todas las pruebas usan `withGlobalTransaction()`: corren sobre **una sola conexion**. El conflicto solo existe entre dos.
+
+> **Una prueba que corre en una sola conexion no puede encontrar un problema que solo existe entre dos.**
+
+`tests/unit/rotacion_refresh.spec.ts` es el unico grupo sin transaccion global, a proposito. Compite `rotar()` contra un temporizador: sin la correccion gana el temporizador. Verificado en ambos sentidos — reintroduciendo el defecto, la prueba se cuelga.
+
+#### Regla derivada
+
+Dentro de `db.transaction`, **todo `create` y `save` debe recibir el cliente de la transaccion**. Si la fila insertada apunta por llave foranea a una fila bloqueada en esa misma transaccion, omitirlo cuelga la peticion en vez de fallar.
+
+---
+
 ## Lo que falta
 
 1. **Correo** para códigos 2FA, invitaciones y recuperación. Hoy el código se escribe en el log fuera de producción (`[DEV] Codigo de verificacion: 123456`), que es lo que permite desarrollar sin servidor de correo.
