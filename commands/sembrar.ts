@@ -60,7 +60,10 @@ export default class Sembrar extends BaseCommand {
     const { default: db } = await import('@adonisjs/lucid/services/db')
     const app = this.app
 
-
+    if (this.app.inProduction) {
+      this.logger.error('El seeder no corre en producción. Abortado.')
+      return
+    }
 
     if (this.limpiar) await this.borrarTodo(db)
 
@@ -262,7 +265,7 @@ export default class Sembrar extends BaseCommand {
 
     // ═══════════════════════════════════════════════════ 4. Checklists
     const { ChecklistService } = await import('#modules/checklists/services/checklist_service')
-    const checklists = new ChecklistService()
+    const checklists = await app.container.make(ChecklistService)
 
     /**
      * La plantilla se reutiliza por nombre. Recrearla en cada corrida dejaría
@@ -423,14 +426,16 @@ export default class Sembrar extends BaseCommand {
     const items = await db.from('checklist_item').where('id_checklist', clMontaje.id).orderBy('orden')
     await checklists.responder(
       inst1.id,
-      items.map((it) => ({ idItem: it.id_item, cantidad: it.cantidad_esperada, hecho: true }))
+      items.map((it) => ({ idItem: it.id_item, cantidad: it.cantidad_esperada, hecho: true })),
+      meseros[0].uuid
     )
     await checklists.aprobar(inst1.id)
 
     const inst2 = await checklists.instanciar(participaciones[2].id, clMontaje.id)
     await checklists.responder(
       inst2.id,
-      items.slice(0, 3).map((it) => ({ idItem: it.id_item, cantidad: it.cantidad_esperada, hecho: true }))
+      items.slice(0, 3).map((it) => ({ idItem: it.id_item, cantidad: it.cantidad_esperada, hecho: true })),
+      meseros[2].uuid
     )
 
     /** Dos mesas vinculadas y una asignada sin vincular: los tres estados. */
