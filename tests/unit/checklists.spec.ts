@@ -12,6 +12,7 @@ import type { SgebError } from '#shared/errors/sgeb_error'
 
 const UUID_CAP = '3f2a9c14-8b7e-4d61-9a03-2c5e77b1d840'
 const UUID_MESERO = 'aa2a9c14-8b7e-4d61-9a03-2c5e77b1d841'
+const UUID_OTRO = 'bb2a9c14-8b7e-4d61-9a03-2c5e77b1d842'
 
 async function codigo(fn: () => Promise<unknown>): Promise<string> {
   try {
@@ -35,6 +36,7 @@ test.group('Checklists', (group) => {
     await db.table('usuario').insert([
       { uuid_usuario: UUID_CAP, id_rol: 2, nombre: 'Cap', apellido_paterno: 'X', correo: 'c@x.mx', password_hash: 'x'.repeat(60) },
       { uuid_usuario: UUID_MESERO, id_rol: 3, nombre: 'Mesero', apellido_paterno: 'X', correo: 'm@x.mx', password_hash: 'x'.repeat(60) },
+      { uuid_usuario: UUID_OTRO, id_rol: 3, nombre: 'Otro', apellido_paterno: 'X', correo: 'm2@x.mx', password_hash: 'x'.repeat(60) },
     ])
 
     const sa = await Salon.create({
@@ -62,7 +64,7 @@ test.group('Checklists', (group) => {
       await part.cambiarEstado(p.id, s)
     }
 
-    return { evento: e, mesa, participacion: p, part, checklists: new ChecklistService() }
+    return { evento: e, mesa, participacion: p, part, checklists: await app.container.make(ChecklistService) }
   }
 
   // ══════════════════════════════════════════════════════════ plantillas
@@ -169,14 +171,14 @@ test.group('Checklists', (group) => {
 
     const parcial = await checklists.responder(inst.id, [
       { idItem: items[0].id_item, cantidad: 20, hecho: true },
-    ])
+    ], UUID_MESERO)
     assert.isFalse(parcial.instancia.completado)
     assert.equal(parcial.pendientes, 2)
 
     const total = await checklists.responder(inst.id, [
       { idItem: items[1].id_item, cantidad: 20, hecho: true },
       { idItem: items[2].id_item, cantidad: 80, hecho: true },
-    ])
+    ], UUID_MESERO)
 
     /**
      * Si la app pudiera declarar `completado`, bastaría con enviar `true` para
@@ -184,6 +186,29 @@ test.group('Checklists', (group) => {
      */
     assert.isTrue(total.instancia.completado)
     assert.equal(total.pendientes, 0)
+  })
+
+  test('SGEB-1004: un mesero no llena el checklist de otro', async ({ assert }) => {
+    const { checklists, participacion } = await escenario()
+    const c = await checklists.crear({ nombre: 'Montaje', tipo: 'montaje', items: ITEMS_MONTAJE })
+    const inst = await checklists.instanciar(participacion.id, c.id)
+    const items = await db.from('checklist_item').where('id_checklist', c.id).orderBy('orden')
+
+    /**
+     * Sin esta comprobación, cualquier mesero podía llenar el checklist ajeno y
+     * desbloquearle la asignación de mesas sin haber montado nada: el capitán
+     * aprobaría un montaje que su autor nunca revisó.
+     */
+    assert.equal(
+      await codigo(() =>
+        checklists.responder(
+          inst.id,
+          [{ idItem: items[0].id_item, cantidad: 20, hecho: true }],
+          UUID_OTRO
+        )
+      ),
+      'SGEB-1004'
+    )
   })
 
   test('SGEB-2012: la cantidad no excede lo esperado', async ({ assert }) => {
@@ -194,7 +219,11 @@ test.group('Checklists', (group) => {
 
     assert.equal(
       await codigo(() =>
-        checklists.responder(inst.id, [{ idItem: items[0].id_item, cantidad: 99, hecho: true }])
+        checklists.responder(
+          inst.id,
+          [{ idItem: items[0].id_item, cantidad: 99, hecho: true }],
+          UUID_MESERO
+        )
       ),
       'SGEB-2012'
     )
@@ -212,7 +241,7 @@ test.group('Checklists', (group) => {
 
     assert.equal(
       await codigo(() =>
-        checklists.responder(inst.id, [{ idItem: itemAjeno.id_item, cantidad: 1, hecho: true }])
+        checklists.responder(inst.id, [{ idItem: itemAjeno.id_item, cantidad: 1, hecho: true }], UUID_MESERO)
       ),
       'SGEB-3002'
     )
@@ -239,7 +268,8 @@ test.group('Checklists', (group) => {
 
     await checklists.responder(
       inst.id,
-      items.map((i) => ({ idItem: i.id_item, cantidad: i.cantidad_esperada, hecho: true }))
+      items.map((i) => ({ idItem: i.id_item, cantidad: i.cantidad_esperada, hecho: true })),
+      UUID_MESERO
     )
 
     /**
@@ -268,7 +298,7 @@ test.group('Checklists', (group) => {
     const inst = await checklists.instanciar(participacion.id, c.id)
     const item = await db.from('checklist_item').where('id_checklist', c.id).firstOrFail()
 
-    await checklists.responder(inst.id, [{ idItem: item.id_item, cantidad: 5, hecho: true }])
+    await checklists.responder(inst.id, [{ idItem: item.id_item, cantidad: 5, hecho: true }], UUID_MESERO)
     const r = await checklists.aprobar(inst.id)
 
     /** El de cierre alimenta el bloqueo de pagos por otra vía, no `checklist_ok`. */
@@ -284,7 +314,8 @@ test.group('Checklists', (group) => {
 
     await checklists.responder(
       inst.id,
-      items.map((i) => ({ idItem: i.id_item, cantidad: i.cantidad_esperada, hecho: true }))
+      items.map((i) => ({ idItem: i.id_item, cantidad: i.cantidad_esperada, hecho: true })),
+      UUID_MESERO
     )
     await checklists.aprobar(inst.id)
 
@@ -294,7 +325,7 @@ test.group('Checklists', (group) => {
      */
     assert.equal(
       await codigo(() =>
-        checklists.responder(inst.id, [{ idItem: items[0].id_item, cantidad: 0, hecho: false }])
+        checklists.responder(inst.id, [{ idItem: items[0].id_item, cantidad: 0, hecho: false }], UUID_MESERO)
       ),
       'SGEB-4011'
     )
@@ -307,7 +338,8 @@ test.group('Checklists', (group) => {
     const items = await db.from('checklist_item').where('id_checklist', c.id).orderBy('orden')
     await checklists.responder(
       inst.id,
-      items.map((i) => ({ idItem: i.id_item, cantidad: i.cantidad_esperada, hecho: true }))
+      items.map((i) => ({ idItem: i.id_item, cantidad: i.cantidad_esperada, hecho: true })),
+      UUID_MESERO
     )
     await checklists.aprobar(inst.id)
     await part.asignarMesa(participacion.id, mesa.id)
@@ -335,11 +367,12 @@ test.group('Checklists', (group) => {
 
     await checklists.responder(
       inst.id,
-      items.map((i) => ({ idItem: i.id_item, cantidad: i.cantidad_esperada, hecho: true }))
+      items.map((i) => ({ idItem: i.id_item, cantidad: i.cantidad_esperada, hecho: true })),
+      UUID_MESERO
     )
     const r = await checklists.responder(inst.id, [
       { idItem: items[0].id_item, cantidad: 10, hecho: false },
-    ])
+    ], UUID_MESERO)
 
     assert.isFalse(r.instancia.completado)
     assert.equal(r.pendientes, 1)
