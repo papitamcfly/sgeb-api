@@ -41,21 +41,25 @@ export class MqttService {
 
     this.client.on('message', async (topic, payload) => {
       try {
-        // 1. Manejo de heartbeat o status del Gateway
-        if (topic.includes('/gateway/status') || topic.includes('/heartbeat')) {
-          const partes = topic.split('/')
-          const mac = partes[1] // ej: "barra1"
-          if (mac) {
-            const { CubaitorService } = await import('#modules/cubaitor/services/cubaitor_service')
-            const cubService = new CubaitorService()
-            await cubService.heartbeat(mac)
-            logger.debug({ mac, topic }, 'Heartbeat de Cubaitor actualizado vía MQTT')
-          }
-          return
+        const partes = topic.split('/')
+        const mac = partes[1] // ej: "barra1"
+
+        let data: any = {}
+        try {
+          data = JSON.parse(payload.toString())
+        } catch (e) {}
+
+        const isHeartbeat = topic.includes('/gateway/status') || topic.includes('/heartbeat') || data.cmd === 'hb'
+
+        // 1. Manejo de heartbeat o cualquier latido implícito
+        if (mac && isHeartbeat) {
+          const { CubaitorService } = await import('#modules/cubaitor/services/cubaitor_service')
+          const cubService = new CubaitorService()
+          await cubService.heartbeat(mac).catch(() => {})
+          
+          if (!data.tipo || data.tipo === 'ack') return
         }
 
-        const data = JSON.parse(payload.toString())
-        
         // 2. El dispositivo reporta estado cerrada al terminar de dispensar
         // {"tipo": "estado", "estado": "cerrada", "causa": "auto_cierre", "ts_ms": 95028, "id": 1042, "ts_apertura_ms": 90026}
         if (data.tipo === 'estado' && data.estado === 'cerrada' && data.id) {
